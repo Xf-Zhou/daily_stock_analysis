@@ -390,16 +390,16 @@ Dockerfile 使用多阶段构建，前端会在构建镜像时自动打包并内
 如需覆盖静态资源，可挂载本地 `static/` 到容器内 `/app/static`。
 运行中的 `server` 容器默认直接复用 `/app/static` 里的预构建产物，不要求容器内保留 `apps/dsa-web` 源码目录或运行时安装 `npm`；若 WebUI 无法打开，请优先确认 `/app/static/index.html` 是否存在。
 
-当前官方镜像发布地址：
+当前镜像发布地址：
 
-- GHCR：`ghcr.io/zhulinsen/daily_stock_analysis:<tag>`
-- Docker Hub：`<DOCKERHUB_USERNAME>/daily_stock_analysis:<tag>`（由发布者的 `DOCKERHUB_USERNAME` secret 决定，官方发布为 `zhulinsen/daily_stock_analysis`）
+- GHCR：`ghcr.io/xf-zhou/daily_stock_analysis:<tag>`
+- Docker Hub：`<DOCKERHUB_USERNAME>/daily_stock_analysis:<tag>`（可选，由发布者的 `DOCKERHUB_USERNAME` secret 决定）
 
 ### 快速启动
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/ZhuLinsen/daily_stock_analysis.git
+git clone https://github.com/Xf-Zhou/daily_stock_analysis.git
 cd daily_stock_analysis
 
 # 2. 配置环境变量
@@ -418,13 +418,13 @@ docker-compose -f ./docker/docker-compose.yml up -d            # 同时启动两
 docker-compose -f ./docker/docker-compose.yml logs -f server
 ```
 
-### 直接拉官方镜像运行
+### 直接拉 GHCR 镜像运行
 
-如果你不打算在目标机器上保留源码，可以直接拉取官方镜像：
+如果你不打算在目标机器上保留源码，可以直接拉取已发布镜像：
 
 ```bash
 # Web/API 模式
-docker pull zhulinsen/daily_stock_analysis:latest
+docker pull ghcr.io/xf-zhou/daily_stock_analysis:latest
 docker run -d \
   --name dsa-server \
   --env-file .env \
@@ -433,7 +433,7 @@ docker run -d \
   -v "$(pwd)/logs:/app/logs" \
   -v "$(pwd)/reports:/app/reports" \
   -v "$(pwd)/.env:/app/.env" \
-  zhulinsen/daily_stock_analysis:latest \
+  ghcr.io/xf-zhou/daily_stock_analysis:latest \
   python main.py --serve-only --host 0.0.0.0 --port 8000
 
 # 定时任务模式
@@ -444,7 +444,7 @@ docker run -d \
   -v "$(pwd)/logs:/app/logs" \
   -v "$(pwd)/reports:/app/reports" \
   -v "$(pwd)/.env:/app/.env" \
-  zhulinsen/daily_stock_analysis:latest
+  ghcr.io/xf-zhou/daily_stock_analysis:latest
 ```
 
 如需固定版本或便于回滚，请将 `latest` 替换为具体版本 tag，例如 `v3.13.0`。
@@ -1272,7 +1272,7 @@ A: 检查是否启用了 Actions，以及 cron 表达式是否正确（注意是
 
 ---
 
-更多问题请 [提交 Issue](https://github.com/ZhuLinsen/daily_stock_analysis/issues)
+更多问题请 [提交 Issue](https://github.com/Xf-Zhou/daily_stock_analysis/issues)
 
 ## Agent 工具数据缓存与持久化
 
