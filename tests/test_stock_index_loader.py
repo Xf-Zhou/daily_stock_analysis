@@ -101,6 +101,66 @@ class TestStockIndexLoader(unittest.TestCase):
             ):
                 self.assertEqual(stock_index_loader.get_index_stock_name("000001"), "平安银行")
 
+    def test_load_stock_index_entries_supports_legacy_extended_and_object_shapes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            index_path = Path(temp_dir) / "stocks.index.json"
+            index_path.write_text(
+                json.dumps(
+                    [
+                        ["000001.SZ", "000001", "平安银行", "pinganyinhang", "payh", [], "CN", "stock", True, 100],
+                        ["832566.BJ", "832566", "梓橦宫", "zitonggong", "ztg", [], "BSE", "stock", True, 100, "医药商业", "tushare"],
+                        {
+                            "canonicalCode": "AAPL",
+                            "displayCode": "AAPL",
+                            "nameZh": "APPLE",
+                            "market": "US",
+                            "assetType": "stock",
+                            "active": True,
+                            "popularity": 100,
+                            "industry": "消费电子",
+                            "industrySource": "override",
+                        },
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            missing_override_path = Path(temp_dir) / "missing-overrides.csv"
+            with patch.object(stock_index_loader, "get_stock_index_candidate_paths", return_value=(index_path,)), \
+                 patch.object(stock_index_loader, "get_stock_industry_overrides_path", return_value=missing_override_path):
+                entries = stock_index_loader.load_stock_index_entries()
+
+            self.assertEqual([entry.canonical_code for entry in entries], ["000001.SZ", "832566.BJ", "AAPL"])
+            self.assertIsNone(entries[0].industry)
+            self.assertEqual(entries[1].industry, "医药商业")
+            self.assertEqual(entries[1].industry_source, "tushare")
+            self.assertEqual(entries[2].industry, "消费电子")
+            self.assertEqual(entries[2].industry_source, "override")
+
+    def test_load_stock_index_entries_applies_industry_overrides(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            index_path = Path(temp_dir) / "stocks.index.json"
+            override_path = Path(temp_dir) / "stock_industry_overrides.csv"
+            index_path.write_text(
+                json.dumps(
+                    [["000001.SZ", "000001", "平安银行", "pinganyinhang", "payh", [], "CN", "stock", True, 100]],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            override_path.write_text(
+                "code,industry,industry_source\n000001.SZ,银行,unit-test\n",
+                encoding="utf-8",
+            )
+
+            with patch.object(stock_index_loader, "get_stock_index_candidate_paths", return_value=(index_path,)), \
+                 patch.object(stock_index_loader, "get_stock_industry_overrides_path", return_value=override_path):
+                entries = stock_index_loader.load_stock_index_entries()
+
+            self.assertEqual(entries[0].industry, "银行")
+            self.assertEqual(entries[0].industry_source, "unknown")
+
 
 if __name__ == "__main__":
     unittest.main()

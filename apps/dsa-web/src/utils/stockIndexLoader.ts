@@ -4,7 +4,7 @@
  * Responsible for loading and parsing stock index data
  */
 
-import type { StockIndexData, StockIndexItem, StockIndexTuple } from '../types/stockIndex';
+import type { IndustrySource, StockIndexData, StockIndexItem, StockIndexTuple } from '../types/stockIndex';
 import { INDEX_FIELD } from './stockIndexFields';
 
 export interface IndexLoadResult {
@@ -37,7 +37,7 @@ export async function loadStockIndex(): Promise<IndexLoadResult> {
     // Uncompress format (if array format)
     const items = isCompressedFormat(data)
       ? unpackTuples(data as StockIndexTuple[])
-      : data as StockIndexItem[];
+      : normalizeItems(data as StockIndexItem[]);
 
     return {
       data: items,
@@ -79,7 +79,26 @@ function unpackTuples(tuples: StockIndexTuple[]): StockIndexItem[] {
     assetType: tuple[INDEX_FIELD.ASSET_TYPE],
     active: tuple[INDEX_FIELD.ACTIVE],
     popularity: tuple[INDEX_FIELD.POPULARITY],
+    industry: tuple[INDEX_FIELD.INDUSTRY],
+    industrySource: normalizeIndustrySource(tuple[INDEX_FIELD.INDUSTRY_SOURCE]),
   }));
+}
+
+function normalizeItems(items: StockIndexItem[]): StockIndexItem[] {
+  return items.map(item => ({
+    ...item,
+    industrySource: normalizeIndustrySource(item.industrySource),
+  }));
+}
+
+function normalizeIndustrySource(value: unknown): IndustrySource | undefined {
+  const source = String(value ?? '').trim().toLowerCase();
+  if (!source) return undefined;
+  if (source === 'override' || source === 'manual' || source === 'core_pool') return 'override';
+  if (source === 'tushare' || source === 'csv' || source === 'industry' || source === 'classify' || source === 'sector') {
+    return 'tushare';
+  }
+  return 'unknown';
 }
 
 /**
@@ -99,6 +118,8 @@ export function compressIndex(items: StockIndexItem[]): StockIndexTuple[] {
     item.assetType,
     item.active,
     item.popularity,
+    item.industry,
+    item.industrySource,
   ]);
 }
 

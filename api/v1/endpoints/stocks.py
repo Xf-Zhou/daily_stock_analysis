@@ -7,12 +7,13 @@
 职责：
 1. POST /api/v1/stocks/extract-from-image 从图片提取股票代码
 2. POST /api/v1/stocks/parse-import 解析 CSV/Excel/剪贴板
-3. GET /api/v1/stocks/{code}/quote 实时行情接口
-4. GET /api/v1/stocks/{code}/history 历史行情接口
+3. GET /api/v1/stocks/rankings 行情榜单接口
+4. GET /api/v1/stocks/{code}/quote 实时行情接口
+5. GET /api/v1/stocks/{code}/history 历史行情接口
 """
 
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 
@@ -22,6 +23,7 @@ from api.v1.schemas.stocks import (
     KLineData,
     StockHistoryResponse,
     StockQuote,
+    StockRankingsResponse,
 )
 from api.v1.schemas.common import ErrorResponse
 from src.services.image_stock_extractor import (
@@ -33,6 +35,10 @@ from src.services.import_parser import (
     MAX_FILE_BYTES,
     parse_import_from_bytes,
     parse_import_from_text,
+)
+from src.services.stock_discovery_service import (
+    UNCATEGORIZED_INDUSTRY,
+    StockDiscoveryService,
 )
 from src.services.stock_service import StockService
 
@@ -237,6 +243,49 @@ async def parse_import(request: Request) -> ExtractFromImageResponse:
     ]
     codes = list(dict.fromkeys(i.code for i in extract_items if i.code))
     return ExtractFromImageResponse(codes=codes, items=extract_items, raw_text=None)
+
+
+@router.get(
+    "/rankings",
+    response_model=StockRankingsResponse,
+    responses={
+        200: {"description": "股票行情榜单"},
+        422: {"description": "参数无效", "model": ErrorResponse},
+        500: {"description": "服务器错误", "model": ErrorResponse},
+    },
+    summary="获取股票行情榜单",
+    description=(
+        "按市场、行业、指标获取股票榜单。industry 不传表示全部；"
+        f"industry={UNCATEGORIZED_INDUSTRY} 表示未分类。"
+    ),
+)
+def get_stock_rankings(
+    market: Literal["CN", "BSE", "HK", "US"] = Query(..., description="市场"),
+    industry: Optional[str] = Query(None, description="行业，未分类使用 __uncategorized__"),
+    metric: Literal["change_pct", "amount", "volume"] = Query("change_pct", description="排序指标"),
+    direction: Literal["desc", "asc"] = Query("desc", description="排序方向"),
+    limit: int = Query(20, ge=1, le=100, description="返回数量"),
+) -> StockRankingsResponse:
+    try:
+        payload = StockDiscoveryService().get_rankings(
+            market=market,
+            industry=industry,
+            metric=metric,
+            direction=direction,
+            limit=limit,
+        )
+        return StockRankingsResponse(**payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "invalid_params", "message": str(exc)},
+        )
+    except Exception as exc:
+        logger.error("[股票榜单] 获取榜单失败: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "internal_error", "message": "获取股票榜单失败"},
+        )
 
 
 @router.get(

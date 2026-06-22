@@ -11,7 +11,7 @@ import {
   getPopularStocks,
   groupStocksByMarket,
 } from '../stockIndexLoader';
-import type { StockIndexItem } from '../../types/stockIndex';
+import type { StockIndexItem, StockIndexTuple } from '../../types/stockIndex';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 // Mock fetch
@@ -102,9 +102,9 @@ describe('stockIndexLoader', () => {
     });
 
     test('successfully loads compressed format index (tuple format)', async () => {
-      const compressedData = [
+      const compressedData: StockIndexTuple[] = [
         ['600519.SH', '600519', '贵州茅台', 'guizhoumaotai', 'gzmt', ['茅台'], 'CN', 'stock', true, 100],
-        ['000001.SZ', '000001', '平安银行', 'pinganyinxing', 'payh', ['平银'], 'CN', 'stock', true, 90],
+        ['000001.SZ', '000001', '平安银行', 'pinganyinxing', 'payh', ['平银'], 'CN', 'stock', true, 90, '银行', 'tushare'],
       ];
 
       mockFetch.mockResolvedValueOnce({
@@ -119,6 +119,9 @@ describe('stockIndexLoader', () => {
       expect(result.data).toHaveLength(2);
       expect(result.data[0].canonicalCode).toBe('600519.SH');
       expect(result.data[0].nameZh).toBe('贵州茅台');
+      expect(result.data[0].industry).toBeUndefined();
+      expect(result.data[1].industry).toBe('银行');
+      expect(result.data[1].industrySource).toBe('tushare');
     });
 
     test('returns fallback mode on network error', async () => {
@@ -205,6 +208,8 @@ describe('stockIndexLoader', () => {
         'stock',
         true,
         100,
+        undefined,
+        undefined,
       ]);
     });
 

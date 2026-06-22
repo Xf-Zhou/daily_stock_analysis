@@ -9,7 +9,7 @@
 2. 定义历史 K 线数据模型
 """
 
-from typing import Optional, List
+from typing import Literal, Optional, List
 
 from pydantic import BaseModel, Field
 
@@ -74,6 +74,30 @@ class KLineData(BaseModel):
                 "change_percent": 0.84
             }
         }
+
+
+class StockRankingItem(BaseModel):
+    """股票榜单条目"""
+
+    code: str = Field(..., description="股票代码")
+    name: str = Field(..., description="股票名称")
+    market: Literal["CN", "BSE", "HK", "US"] = Field(..., description="市场")
+    industry: Optional[str] = Field(None, description="行业，缺失表示未分类")
+    price: Optional[float] = Field(None, description="最新价")
+    change_pct: Optional[float] = Field(None, description="涨跌幅 (%)")
+    amount: Optional[float] = Field(None, description="成交额")
+    volume: Optional[float] = Field(None, description="成交量")
+    source: Optional[str] = Field(None, description="实际成功返回行情的数据源")
+    updated_at: Optional[str] = Field(None, description="行情更新时间")
+
+
+class StockRankingsResponse(BaseModel):
+    """股票行情榜单响应"""
+
+    status: Literal["ok", "partial", "stale", "unsupported"] = Field(..., description="榜单状态")
+    source: Optional[str] = Field(None, description="整体实际成功返回行情的数据源")
+    updated_at: Optional[str] = Field(None, description="整体更新时间")
+    items: List[StockRankingItem] = Field(default_factory=list, description="榜单条目")
 
 
 class ExtractItem(BaseModel):

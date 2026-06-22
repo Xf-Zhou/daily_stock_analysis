@@ -12,6 +12,7 @@ import { HistoryList } from '../components/history';
 import { ReportMarkdown, ReportSummary } from '../components/report';
 import { TaskPanel } from '../components/tasks';
 import { useDashboardLifecycle, useHomeDashboardState } from '../hooks';
+import type { SelectionSource } from '../types/analysis';
 import type { SetupStatusResponse } from '../types/systemConfig';
 import { getReportText, normalizeReportLanguage } from '../utils/reportLanguage';
 
@@ -148,7 +149,7 @@ const HomePage: React.FC = () => {
     (
       stockCode?: string,
       stockName?: string,
-      selectionSource?: 'manual' | 'autocomplete' | 'import' | 'image',
+      selectionSource?: SelectionSource,
     ) => {
       void submitAnalysis({
         stockCode,

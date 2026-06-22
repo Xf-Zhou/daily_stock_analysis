@@ -3,13 +3,11 @@ import { analysisApi, DuplicateTaskError } from '../api/analysis';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
 import { historyApi } from '../api/history';
-import type { AnalysisReport, HistoryItem, HistoryListResponse, TaskInfo } from '../types/analysis';
+import type { AnalysisReport, HistoryItem, HistoryListResponse, SelectionSource, TaskInfo } from '../types/analysis';
 import { getRecentStartDate, getTodayInShanghai } from '../utils/format';
 import { isObviouslyInvalidStockQuery, looksLikeStockCode, validateStockCode } from '../utils/validation';
 
 const PAGE_SIZE = 20;
-
-type SelectionSource = 'manual' | 'autocomplete' | 'import' | 'image';
 
 type FetchHistoryOptions = {
   autoSelectFirst?: boolean;

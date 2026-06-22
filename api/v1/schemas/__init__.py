@@ -37,6 +37,8 @@ from api.v1.schemas.history import (
 from api.v1.schemas.stocks import (
     StockQuote,
     StockHistoryResponse,
+    StockRankingItem,
+    StockRankingsResponse,
     KLineData,
 )
 from api.v1.schemas.backtest import (
@@ -121,6 +123,8 @@ __all__ = [
     # stocks
     "StockQuote",
     "StockHistoryResponse",
+    "StockRankingItem",
+    "StockRankingsResponse",
     "KLineData",
     # backtest
     "BacktestRunRequest",

@@ -1,0 +1,44 @@
+symbol,name,industry
+AAPL,Apple Inc.,Consumer Electronics
+MSFT,Microsoft Corporation,Software
+NVDA,NVIDIA Corporation,Semiconductors
+GOOGL,Alphabet Inc.,Internet Services
+GOOG,Alphabet Inc.,Internet Services
+AMZN,Amazon.com Inc.,E-Commerce
+META,Meta Platforms Inc.,Internet Services
+TSLA,Tesla Inc.,Automobiles
+AVGO,Broadcom Inc.,Semiconductors
+AMD,Advanced Micro Devices Inc.,Semiconductors
+INTC,Intel Corporation,Semiconductors
+NFLX,Netflix Inc.,Streaming Media
+ADBE,Adobe Inc.,Software
+CRM,Salesforce Inc.,Software
+ORCL,Oracle Corporation,Software
+JPM,JPMorgan Chase & Co.,Banks
+BAC,Bank of America Corporation,Banks
+GS,Goldman Sachs Group Inc.,Capital Markets
+MS,Morgan Stanley,Capital Markets
+V,Visa Inc.,Payments
+MA,Mastercard Incorporated,Payments
+LLY,Eli Lilly and Company,Pharmaceuticals
+UNH,UnitedHealth Group Incorporated,Healthcare
+XOM,Exxon Mobil Corporation,Energy
+CVX,Chevron Corporation,Energy
+COST,Costco Wholesale Corporation,Retail
+WMT,Walmart Inc.,Retail
+MCD,McDonald's Corporation,Restaurants
+NKE,Nike Inc.,Consumer Goods
+DIS,Walt Disney Company,Entertainment
+UBER,Uber Technologies Inc.,Mobility
+BA,Boeing Company,Aerospace
+CAT,Caterpillar Inc.,Industrial Machinery
+GE,GE Aerospace,Aerospace
+BABA,Alibaba Group Holding Limited,E-Commerce
+PDD,PDD Holdings Inc.,E-Commerce
+NIO,NIO Inc.,Automobiles
+LI,Li Auto Inc.,Automobiles
+XPEV,XPeng Inc.,Automobiles
+TSM,Taiwan Semiconductor Manufacturing Company,Semiconductors
+ASML,ASML Holding N.V.,Semiconductors
+KO,Coca-Cola Company,Beverages
+PEP,PepsiCo Inc.,Beverages

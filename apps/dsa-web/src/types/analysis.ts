@@ -5,6 +5,8 @@
 
 // ============ Request Types ============
 
+export type SelectionSource = 'manual' | 'autocomplete' | 'import' | 'image' | 'discover';
+
 export interface AnalysisRequest {
   stockCode?: string;
   stockCodes?: string[];
@@ -13,7 +15,7 @@ export interface AnalysisRequest {
   asyncMode?: boolean;
   stockName?: string;
   originalQuery?: string;
-  selectionSource?: 'manual' | 'autocomplete' | 'import' | 'image';
+  selectionSource?: SelectionSource;
   notify?: boolean;
 }
 

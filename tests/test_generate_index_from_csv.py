@@ -149,7 +149,8 @@ class TestDataCleaning:
         row = {
             'ts_code': '000001.SZ',
             'symbol': '000001',
-            'name': '平安银行'
+            'name': '平安银行',
+            'industry': '银行',
         }
         result = parse_stock_row(row, 'CN')
         assert result is not None
@@ -157,6 +158,8 @@ class TestDataCleaning:
         assert result['symbol'] == '000001'
         assert result['name'] == '平安银行'
         assert result['market'] == 'CN'
+        assert result['industry'] == '银行'
+        assert result['industry_source'] == 'tushare'
 
     def test_valid_hk_stock(self):
         """测试有效的港股记录"""
@@ -315,6 +318,8 @@ class TestOutputFormat:
         assert item[7] == "stock"          # assetType
         assert item[8] == True             # active
         assert item[9] == 100              # popularity
+        assert item[10] is None            # industry
+        assert item[11] is None            # industrySource
 
     def test_compress_index_field_count(self):
         """测试压缩格式的字段数量"""
@@ -332,7 +337,7 @@ class TestOutputFormat:
         }]
 
         compressed = compress_index(index)
-        assert len(compressed[0]) == 10  # 10个字段
+        assert len(compressed[0]) == 12  # 12个字段
 
     def test_json_serialization(self):
         """测试 JSON 序列化"""
@@ -358,6 +363,25 @@ class TestOutputFormat:
         # 应该能成功反序列化
         loaded = json.loads(json_str)
         assert len(loaded) == 1
+
+    def test_industry_fields_survive_build_and_compress(self):
+        """测试行业字段会进入索引并保留到压缩格式"""
+        stocks = [{
+            "ts_code": "000001.SZ",
+            "symbol": "000001",
+            "name": "平安银行",
+            "market": "CN",
+            "industry": "银行",
+            "industry_source": "tushare",
+        }]
+
+        index = build_stock_index(stocks)
+        compressed = compress_index(index)
+
+        assert index[0]["industry"] == "银行"
+        assert index[0]["industrySource"] == "tushare"
+        assert compressed[0][10] == "银行"
+        assert compressed[0][11] == "tushare"
 
 
 class TestIntegration:
@@ -416,7 +440,7 @@ class TestIntegration:
 
         # 验证字段数量
         for item in compressed:
-            assert len(item) == 10
+            assert len(item) == 12
 
     def test_market_distribution(self, tmp_path):
         """测试市场分布统计"""

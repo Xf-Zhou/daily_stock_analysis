@@ -1,0 +1,70 @@
+code,industry,industry_source
+600519.SH,白酒,override
+000858.SZ,白酒,override
+000001.SZ,银行,override
+600036.SH,银行,override
+601318.SH,保险,override
+300750.SZ,电池,override
+002594.SZ,新能源汽车,override
+601899.SH,贵金属,override
+603259.SH,医药外包,override
+688981.SH,半导体,override
+832566.BJ,医药商业,override
+920118.BJ,化工,override
+00700.HK,互联网服务,override
+03690.HK,本地生活,override
+01810.HK,消费电子,override
+09988.HK,电商,override
+09618.HK,电商,override
+09888.HK,搜索与AI,override
+01024.HK,短视频,override
+00981.HK,半导体,override
+02015.HK,新能源汽车,override
+09868.HK,新能源汽车,override
+00005.HK,银行,override
+01299.HK,保险,override
+00941.HK,通信服务,override
+00883.HK,能源,override
+AAPL,Consumer Electronics,override
+MSFT,Software,override
+NVDA,Semiconductors,override
+GOOGL,Internet Services,override
+GOOG,Internet Services,override
+AMZN,E-Commerce,override
+META,Internet Services,override
+TSLA,Automobiles,override
+AVGO,Semiconductors,override
+AMD,Semiconductors,override
+INTC,Semiconductors,override
+NFLX,Streaming Media,override
+ADBE,Software,override
+CRM,Software,override
+ORCL,Software,override
+JPM,Banks,override
+BAC,Banks,override
+GS,Capital Markets,override
+MS,Capital Markets,override
+V,Payments,override
+MA,Payments,override
+LLY,Pharmaceuticals,override
+UNH,Healthcare,override
+XOM,Energy,override
+CVX,Energy,override
+COST,Retail,override
+WMT,Retail,override
+MCD,Restaurants,override
+NKE,Consumer Goods,override
+DIS,Entertainment,override
+UBER,Mobility,override
+BA,Aerospace,override
+CAT,Industrial Machinery,override
+GE,Aerospace,override
+BABA,E-Commerce,override
+PDD,E-Commerce,override
+NIO,Automobiles,override
+LI,Automobiles,override
+XPEV,Automobiles,override
+TSM,Semiconductors,override
+ASML,Semiconductors,override
+KO,Beverages,override
+PEP,Beverages,override

@@ -1009,6 +1009,7 @@ FastAPI provides RESTful API service for configuration management and triggering
 - **First-run Setup Hint** - The Home page reads the read-only setup status and points users to Settings when required items such as the primary LLM channel or watchlist are missing
 - **Real-time Progress** - Analysis task status updates in real-time, supports parallel tasks; the regular stock-analysis path now prefers LiteLLM streaming during the LLM stage and pushes finer-grained `message/progress` updates through task SSE
 - **Market Review visibility** - After clicking Market Review, the API returns a `task_id` and the UI polls `GET /api/v1/analysis/status/{task_id}` to show progress; completed/failure states are rendered explicitly and failure messages are shown directly in the UI error area.
+- **Stock Discovery** - The Web UI can filter stocks by market, industry, and keyword, then jump into analysis or chat from quote rankings
 - **Backtest Validation** - Evaluate historical analysis accuracy, query direction win rate and simulated returns
 - **API Documentation** - Visit `/docs` for Swagger UI
 
@@ -1027,10 +1028,12 @@ FastAPI provides RESTful API service for configuration management and triggering
 | `/api/v1/backtest/results` | GET | Query backtest results (paginated) |
 | `/api/v1/backtest/performance` | GET | Get overall backtest performance |
 | `/api/v1/backtest/performance/{code}` | GET | Get per-stock backtest performance |
+| `/api/v1/stocks/rankings?market=CN|BSE|HK|US&metric=change_pct|amount|volume&direction=desc|asc` | GET | Query stock quote rankings; `limit` is 1..100 and `industry=__uncategorized__` filters uncategorized stocks |
 | `/api/health` | GET | Health check |
 | `/docs` | GET | API Swagger documentation |
 
 > Note: `POST /api/v1/analysis/analyze` supports only one stock when `async_mode=false`; batch `stock_codes` requires `async_mode=true`. The async `202` response returns a single `task_id` for one stock, or an `accepted` / `duplicates` summary for batch requests.
+> Note: The first Web Stock Discovery page filters `stocks.index.json` on the frontend for market, industry, and keyword search; it does not add `/api/v1/stocks/discover`. Static industry fields are written by `scripts/generate_index_from_csv.py` from `data/stock_list_*.csv` or `data/stock_industry_overrides.csv`; `industrySource` is limited to `tushare` / `override` / `unknown`, and missing industries are grouped under `__uncategorized__`. `GET /api/v1/stocks/rankings` returns `status=ok|partial|stale|unsupported` and items with `code/name/market/industry/price/change_pct/amount/volume/source/updated_at`; `source` reports the data provider that actually returned the quotes after fallback. A-share, BSE, and HK batch quotes reuse the existing timeout, rate-limit, circuit-breaker, and cache protections, while US rankings are limited to `data/us_ranking_core_pool.csv` and use a TTL cache.
 > Note: `POST /api/v1/analysis/market-review` follows the same runtime configuration path as CLI/Bot market review (`GeminiAnalyzer(config=...)`, search setup, and prompt/rendering pipeline). The provider compatibility path prioritizes `litellm_model` and `llm_model_list`, then falls back to existing legacy keys (`GEMINI_*`, `OPENAI_*`, `ANTHROPIC_*`, `DEEPSEEK_*`) when those are not set; provider names, Base URL, and LiteLLM routing semantics are otherwise unchanged.
 > Audit note: priority and fallback are defined by `Config._load_from_env()` in `src/config.py` (`LITELLM_CONFIG` > `LLM_CHANNELS` > legacy). Regression coverage is in `tests/test_llm_channel_config.py` (configuration source parsing) and `tests/test_market_review_runtime.py` (shared runtime assembly). The endpoint lock is process/host-level only; multi-instance deployments still need external distributed idempotency controls.
 > Note: when `/api/v1/analysis/market-review` returns a `task_id`, the WebUI polls `GET /api/v1/analysis/status/{task_id}`. The UI renders clear `pending/processing` progress, shows completion feedback when status becomes `completed`, and surfaces `error` content on `failed`.

@@ -6,6 +6,7 @@
 
 export type Market = 'CN' | 'HK' | 'US' | 'INDEX' | 'ETF' | 'BSE';
 export type AssetType = 'stock' | 'index' | 'etf';
+export type IndustrySource = 'tushare' | 'override' | 'unknown';
 
 /**
  * Stock index item (full format)
@@ -33,6 +34,10 @@ export interface StockIndexItem {
   active: boolean;
   /** Popularity */
   popularity?: number;
+  /** Static industry label. Missing means uncategorized. */
+  industry?: string;
+  /** Source of static industry label */
+  industrySource?: IndustrySource;
 }
 
 /**
@@ -69,6 +74,8 @@ export type StockIndexTuple = [
   AssetType,
   boolean, // active
   number | undefined, // popularity
+  (string | undefined)?, // industry
+  (IndustrySource | undefined)?, // industrySource
 ];
 
 /**

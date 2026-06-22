@@ -53,7 +53,9 @@ env/
 .cursorrules
 
 # 数据和日志
-/data/
+/data/*
+!/data/us_ranking_core_pool.csv
+!/data/stock_industry_overrides.csv
 logs/
 reports/
 *.db

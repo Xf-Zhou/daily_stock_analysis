@@ -157,6 +157,25 @@ def get_us_delist_priority(row: Dict[str, str]) -> int:
     return 0
 
 
+def get_industry_from_row(row: Dict[str, str]) -> tuple[str, str]:
+    """Extract optional static industry metadata from a source CSV row."""
+    for key in ('industry', 'classify', 'sector'):
+        industry = (row.get(key) or '').strip()
+        if industry:
+            return industry, 'tushare'
+    return '', ''
+
+
+def normalize_industry_source(source: str, default: str = 'unknown') -> str:
+    """Normalize public industrySource values to the shared frontend contract."""
+    normalized = (source or default or '').strip().lower()
+    if normalized in {'override', 'manual', 'core_pool'}:
+        return 'override'
+    if normalized in {'tushare', 'csv', 'industry', 'classify', 'sector'}:
+        return 'tushare'
+    return 'unknown'
+
+
 def load_akshare_data(logs_dir: Path) -> List[Dict[str, Any]]:
     """
     从 AkShare CSV 文件加载股票数据
@@ -349,12 +368,75 @@ def parse_stock_row(row: Dict[str, str], preferred_market: Optional[str] = None)
     if not display_code:
         return None
 
-    return {
+    industry, industry_source = get_industry_from_row(row)
+
+    parsed = {
         'ts_code': ts_code,
         'symbol': display_code,
         'name': name,
         'market': market,
     }
+    if industry:
+        parsed['industry'] = industry
+        parsed['industry_source'] = industry_source
+
+    return parsed
+
+
+def load_industry_overrides(data_dir: Path) -> Dict[str, tuple[str, str]]:
+    """Load optional static industry overrides keyed by stock code lookup forms."""
+    override_path = data_dir / 'stock_industry_overrides.csv'
+    if not override_path.exists():
+        return {}
+
+    overrides: Dict[str, tuple[str, str]] = {}
+    with open(override_path, 'r', encoding='utf-8-sig') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            code = (row.get('code') or row.get('symbol') or row.get('canonical_code') or '').strip()
+            industry = (row.get('industry') or '').strip()
+            if not code or not industry:
+                continue
+            source = (
+                row.get('industry_source')
+                or row.get('industrySource')
+                or row.get('source')
+                or 'override'
+            ).strip()
+            source = normalize_industry_source(source, default='override')
+            keys = {code, code.upper()}
+            if '.' in code:
+                base = code.rsplit('.', 1)[0]
+                keys.update({base, base.upper()})
+            if code.upper().startswith('HK'):
+                digits = code[2:]
+                if digits.isdigit():
+                    keys.update({digits.zfill(5), f"HK{digits.zfill(5)}"})
+            for key in keys:
+                overrides[key] = (industry, source)
+    return overrides
+
+
+def apply_industry_overrides(index: List[Dict[str, Any]], data_dir: Path) -> None:
+    """Apply optional industry overrides in-place."""
+    overrides = load_industry_overrides(data_dir)
+    if not overrides:
+        return
+
+    for item in index:
+        keys = {
+            item.get('canonicalCode', ''),
+            item.get('displayCode', ''),
+            str(item.get('canonicalCode', '')).upper(),
+            str(item.get('displayCode', '')).upper(),
+        }
+        canonical = str(item.get('canonicalCode', ''))
+        if '.' in canonical:
+            keys.add(canonical.rsplit('.', 1)[0])
+        override = next((overrides[key] for key in keys if key in overrides), None)
+        if override:
+            item['industry'] = override[0]
+            item['industrySource'] = override[1]
 
 
 def determine_market(ts_code: str) -> str:
@@ -504,7 +586,7 @@ def build_stock_index(stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         # Generate aliases.
         aliases = generate_aliases(name, market)
 
-        index.append({
+        item = {
             "canonicalCode": ts_code,    # Example: 000001.SZ, AAPL
             "displayCode": symbol,       # Example: 000001, AAPL
             "nameZh": name,
@@ -515,7 +597,16 @@ def build_stock_index(stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "assetType": "stock",
             "active": True,
             "popularity": 100,
-        })
+        }
+        industry = (stock.get('industry') or '').strip()
+        if industry:
+            item["industry"] = industry
+            item["industrySource"] = normalize_industry_source(
+                stock.get('industry_source') or 'tushare',
+                default='tushare',
+            )
+
+        index.append(item)
 
     return index
 
@@ -543,6 +634,8 @@ def compress_index(index: List[Dict[str, Any]]) -> List[List]:
             item["assetType"],
             item["active"],
             item.get("popularity", 0),
+            item.get("industry"),
+            item.get("industrySource"),
         ])
     return compressed
 
@@ -593,6 +686,7 @@ def main():
 
     print("\n[2/5] 生成索引数据...")
     index = build_stock_index(stocks)
+    apply_industry_overrides(index, Path(__file__).parent.parent / 'data')
 
     # 输出路径
     output_path = (
