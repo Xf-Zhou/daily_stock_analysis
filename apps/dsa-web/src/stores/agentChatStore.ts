@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { agentApi } from '../api/agent';
-import type { ChatSessionItem, ChatStreamRequest } from '../api/agent';
+import type { ChatSessionContext, ChatSessionItem, ChatSessionMessage, ChatStreamRequest } from '../api/agent';
 import {
   getParsedApiError,
   isApiRequestError,
@@ -84,6 +84,8 @@ interface AgentChatState {
   sessionId: string;
   sessions: ChatSessionItem[];
   sessionsLoading: boolean;
+  currentContext: ChatSessionContext | null;
+  contextLoading: boolean;
   chatError: ParsedApiError | null;
   currentRoute: string;
   completionBadge: boolean;
@@ -96,8 +98,11 @@ interface AgentChatActions {
   clearCompletionBadge: () => void;
   loadSessions: () => Promise<void>;
   loadInitialSession: () => Promise<void>;
+  loadSessionDetail: (targetSessionId: string) => Promise<void>;
   switchSession: (targetSessionId: string) => Promise<void>;
-  startNewChat: () => void;
+  startNewChat: (nextSessionId?: string) => void;
+  saveContext: (context: ChatSessionContext) => Promise<void>;
+  removeContext: () => Promise<void>;
   startStream: (payload: ChatStreamRequest, meta?: StreamMeta) => Promise<void>;
 }
 
@@ -106,6 +111,15 @@ const getInitialSessionId = (): string =>
     ? localStorage.getItem(STORAGE_KEY_SESSION) || generateUUID()
     : generateUUID();
 
+let contextMutationVersion = 0;
+
+const mapSessionMessages = (messages: ChatSessionMessage[]): Message[] =>
+  messages.map((m) => ({
+    id: m.id,
+    role: m.role,
+    content: m.content,
+  }));
+
 export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set, get) => ({
   messages: [],
   loading: false,
@@ -113,6 +127,8 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
   sessionId: getInitialSessionId(),
   sessions: [],
   sessionsLoading: false,
+  currentContext: null,
+  contextLoading: false,
   chatError: null,
   currentRoute: '',
   completionBadge: false,
@@ -136,31 +152,32 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
   },
 
   loadInitialSession: async () => {
-    const { hasInitialLoad } = get();
+    const { hasInitialLoad, sessionId: initialSessionId } = get();
     if (hasInitialLoad) return;
+    const initialSavedId = localStorage.getItem(STORAGE_KEY_SESSION);
+    const sessionUnchanged = () =>
+      get().sessionId === initialSessionId
+      && localStorage.getItem(STORAGE_KEY_SESSION) === initialSavedId;
     set({ hasInitialLoad: true, sessionsLoading: true });
 
     try {
       const sessionList = await agentApi.getChatSessions();
       set({ sessions: sessionList });
+      if (!sessionUnchanged()) return;
 
-      const savedId = localStorage.getItem(STORAGE_KEY_SESSION);
+      const savedId = initialSavedId;
       if (savedId) {
         const sessionExists = sessionList.some((s) => s.session_id === savedId);
         if (sessionExists) {
-          const msgs = await agentApi.getChatSessionMessages(savedId);
-          if (msgs.length > 0) {
-            set({
-              messages: msgs.map((m) => ({
-                id: m.id,
-                role: m.role,
-                content: m.content,
-              })),
-            });
-          }
+          const detail = await agentApi.getChatSessionDetail(savedId);
+          if (!sessionUnchanged()) return;
+          set({
+            messages: mapSessionMessages(detail.messages),
+            currentContext: detail.context,
+          });
         } else {
           const newId = generateUUID();
-          set({ sessionId: newId });
+          set({ sessionId: newId, currentContext: null });
           localStorage.setItem(STORAGE_KEY_SESSION, newId);
         }
       } else {
@@ -173,43 +190,92 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
     }
   },
 
-  switchSession: async (targetSessionId) => {
-    const { sessionId, messages, abortController } = get();
-    if (targetSessionId === sessionId && messages.length > 0) return;
+  loadSessionDetail: async (targetSessionId) => {
+    const mutationVersion = ++contextMutationVersion;
+    set({ contextLoading: true });
+    try {
+      const detail = await agentApi.getChatSessionDetail(targetSessionId);
+      if (contextMutationVersion === mutationVersion) {
+        set({
+          messages: mapSessionMessages(detail.messages),
+          currentContext: detail.context,
+        });
+      }
+    } finally {
+      if (contextMutationVersion === mutationVersion) {
+        set({ contextLoading: false });
+      }
+    }
+  },
 
+  switchSession: async (targetSessionId) => {
+    const { sessionId, messages, currentContext, abortController } = get();
+    if (targetSessionId === sessionId && (messages.length > 0 || currentContext)) return;
+
+    contextMutationVersion += 1;
     abortController?.abort();
     set({ abortController: null });
 
-    set({ messages: [], sessionId: targetSessionId });
+    set({ messages: [], currentContext: null, sessionId: targetSessionId });
     localStorage.setItem(STORAGE_KEY_SESSION, targetSessionId);
 
     try {
-      const msgs = await agentApi.getChatSessionMessages(targetSessionId);
-      set({
-        messages: msgs.map((m) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-        })),
-      });
+      await get().loadSessionDetail(targetSessionId);
     } catch {
       // Ignore
     }
   },
 
-  startNewChat: () => {
+  startNewChat: (nextSessionId) => {
     // Abort any in-flight stream so the old request does not keep running
     get().abortController?.abort();
-    const newId = generateUUID();
+    contextMutationVersion += 1;
+    const newId = nextSessionId || generateUUID();
     set({
       sessionId: newId,
       messages: [],
+      currentContext: null,
+      contextLoading: false,
       loading: false,
       progressSteps: [],
       chatError: null,
       abortController: null,
     });
     localStorage.setItem(STORAGE_KEY_SESSION, newId);
+  },
+
+  saveContext: async (context) => {
+    const { sessionId } = get();
+    const mutationVersion = ++contextMutationVersion;
+    set({ contextLoading: true });
+    try {
+      const savedContext = await agentApi.saveChatSessionContext(sessionId, context);
+      if (contextMutationVersion === mutationVersion) {
+        set({ currentContext: savedContext });
+        await get().loadSessions();
+      }
+    } catch (error) {
+      if (contextMutationVersion === mutationVersion) {
+        set({ currentContext: null });
+      }
+      throw error;
+    } finally {
+      if (contextMutationVersion === mutationVersion) {
+        set({ contextLoading: false });
+      }
+    }
+  },
+
+  removeContext: async () => {
+    const { sessionId } = get();
+    contextMutationVersion += 1;
+    set({ currentContext: null, contextLoading: false });
+    try {
+      await agentApi.deleteChatSessionContext(sessionId);
+      await get().loadSessions();
+    } catch {
+      // UI already removed the context optimistically.
+    }
   },
 
   startStream: async (payload, meta) => {

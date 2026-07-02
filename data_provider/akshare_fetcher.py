@@ -26,7 +26,9 @@ AkshareFetcher - 主数据源 (Priority 1)
 import logging
 import os
 import random
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
@@ -60,6 +62,16 @@ logger = logging.getLogger(__name__)
 
 SINA_REALTIME_ENDPOINT = "hq.sinajs.cn/list"
 TENCENT_REALTIME_ENDPOINT = "qt.gtimg.cn/q"
+_AK_CALL_TIMEOUT = 30
+_AK_CALL_MAX_WORKERS = 2
+_AK_TIMEOUT_COOLDOWN_SECONDS = 60
+_AK_CALL_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_AK_CALL_MAX_WORKERS,
+    thread_name_prefix="akshare-call",
+)
+_AK_CALL_SEMAPHORE = threading.BoundedSemaphore(_AK_CALL_MAX_WORKERS)
+_AK_TIMEOUT_UNTIL: Dict[str, float] = {}
+_AK_TIMEOUT_LOCK = threading.Lock()
 
 
 # User-Agent 池，用于随机轮换
@@ -186,6 +198,51 @@ def _to_sina_tx_symbol(stock_code: str) -> str:
     if base.startswith(("6", "5", "90")):
         return f"sh{base}"
     return f"sz{base}"
+
+
+def _get_ak_call_name(func) -> str:
+    return getattr(func, "__name__", None) or getattr(func, "__qualname__", None) or "akshare_call"
+
+
+def _run_ak_call(func, args, kwargs):
+    try:
+        return func(*args, **kwargs)
+    finally:
+        _AK_CALL_SEMAPHORE.release()
+
+
+def _ak_call_with_timeout(func, *args, timeout: int = _AK_CALL_TIMEOUT, **kwargs):
+    """Run an AkShare library call with bounded caller-side timeout protection."""
+    func_name = _get_ak_call_name(func)
+    now = time.monotonic()
+    with _AK_TIMEOUT_LOCK:
+        cooldown_until = _AK_TIMEOUT_UNTIL.get(func_name, 0)
+        if cooldown_until > now:
+            remaining = max(1, int(cooldown_until - now))
+            raise TimeoutError(f"{func_name} skipped during timeout cooldown ({remaining}s remaining)")
+        if cooldown_until:
+            _AK_TIMEOUT_UNTIL.pop(func_name, None)
+
+    if not _AK_CALL_SEMAPHORE.acquire(blocking=False):
+        raise TimeoutError(f"{func_name} skipped because AkShare call pool is saturated")
+
+    try:
+        future = _AK_CALL_EXECUTOR.submit(_run_ak_call, func, args, kwargs)
+    except Exception:
+        _AK_CALL_SEMAPHORE.release()
+        raise
+
+    try:
+        result = future.result(timeout=timeout)
+        with _AK_TIMEOUT_LOCK:
+            _AK_TIMEOUT_UNTIL.pop(func_name, None)
+        return result
+    except FuturesTimeoutError as exc:
+        if future.cancel():
+            _AK_CALL_SEMAPHORE.release()
+        with _AK_TIMEOUT_LOCK:
+            _AK_TIMEOUT_UNTIL[func_name] = time.monotonic() + _AK_TIMEOUT_COOLDOWN_SECONDS
+        raise TimeoutError(f"{func_name} timeout after {timeout}s") from exc
 
 
 def _classify_realtime_http_error(exc: Exception) -> Tuple[str, str]:
@@ -1362,7 +1419,7 @@ class AkshareFetcher(BaseFetcher):
                 import time as _time
                 api_start = _time.time()
 
-                df = ak.stock_hk_spot_em()
+                df = _ak_call_with_timeout(ak.stock_hk_spot_em)
 
                 api_elapsed = _time.time() - api_start
                 logger.info(f"[API返回] ak.stock_hk_spot_em 成功: 返回 {len(df)} 只港股, 耗时 {api_elapsed:.2f}s")
@@ -1413,7 +1470,7 @@ class AkshareFetcher(BaseFetcher):
             import time as _time
             api_start = _time.time()
 
-            df_spot = ak.stock_hk_spot()
+            df_spot = _ak_call_with_timeout(ak.stock_hk_spot)
 
             api_elapsed = _time.time() - api_start
             logger.info(f"[API返回] ak.stock_hk_spot 成功: 返回 {len(df_spot)} 只港股, 耗时 {api_elapsed:.2f}s")

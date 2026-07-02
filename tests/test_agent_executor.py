@@ -164,6 +164,53 @@ class TestAgentExecutor(unittest.TestCase):
         self.assertEqual(result.provider, "openai")
         self.assertEqual(len(result.tool_calls_log), 0)
 
+    def test_chat_injects_report_context_as_system_before_history(self):
+        registry = _make_registry_with_echo()
+        adapter = _make_mock_adapter()
+        executor = AgentExecutor(registry, adapter, max_steps=2)
+
+        class FakeSession:
+            def get_history(self):
+                return [{"role": "user", "content": "历史问题"}]
+
+        class FakeConversationManager:
+            def get_or_create(self, session_id):
+                return FakeSession()
+
+            def add_message(self, session_id, role, content):
+                return None
+
+        with patch("src.agent.conversation.conversation_manager", FakeConversationManager()):
+            with patch.object(
+                executor,
+                "_run_loop",
+                return_value=AgentResult(success=True, content="ok"),
+            ) as run_loop:
+                result = executor.chat(
+                    "继续分析",
+                    session_id="session-context",
+                    context={
+                        "source_record_id": 1,
+                        "stock_code": "01810.HK",
+                        "stock_name": "小米集团-W",
+                        "previous_price": 0,
+                        "previous_change_pct": 0,
+                        "previous_analysis_summary": {"operationAdvice": "观望"},
+                        "previous_strategy": {"stopLoss": "20.50"},
+                    },
+                )
+
+        self.assertTrue(result.success)
+        messages = run_loop.call_args.args[0]
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertEqual(messages[1]["role"], "system")
+        self.assertIn("历史报告ID: 1", messages[1]["content"])
+        self.assertIn("上次分析价格: 0", messages[1]["content"])
+        self.assertIn("上次涨跌幅: 0%", messages[1]["content"])
+        self.assertEqual(messages[2], {"role": "user", "content": "历史问题"})
+        self.assertEqual(messages[-1], {"role": "user", "content": "继续分析"})
+        self.assertNotIn("好的，我已了解", json.dumps(messages, ensure_ascii=False))
+
     def test_tool_call_then_text(self):
         """Agent calls a tool, gets result, then returns final answer."""
         registry = _make_registry_with_echo()

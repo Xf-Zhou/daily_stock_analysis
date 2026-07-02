@@ -6,6 +6,7 @@ Agent API endpoints.
 import asyncio
 import json
 import logging
+import re
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -15,6 +16,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from src.config import get_config
 from src.services.agent_model_service import list_agent_model_deployments
+from src.storage import get_db
 
 # Tool name -> Chinese display name mapping
 TOOL_DISPLAY_NAMES: Dict[str, str] = {
@@ -40,6 +42,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9:_-]{1,100}$")
+
+
+def validate_chat_session_id(session_id: str) -> str:
+    """Validate chat session ids before using them in storage paths."""
+    if not session_id or not SESSION_ID_PATTERN.fullmatch(session_id):
+        raise HTTPException(status_code=422, detail="Invalid chat session id")
+    return session_id
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -61,6 +72,244 @@ class ChatResponse(BaseModel):
     content: str
     session_id: str
     error: Optional[str] = None
+
+
+class ChatSessionContextPayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    sourceType: str = Field(
+        "analysis_report",
+        validation_alias=AliasChoices("sourceType", "source_type"),
+    )
+    sourceRecordId: int = Field(
+        ...,
+        validation_alias=AliasChoices("sourceRecordId", "source_record_id"),
+    )
+    stockCode: str = Field(
+        ...,
+        validation_alias=AliasChoices("stockCode", "stock_code"),
+    )
+    stockName: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("stockName", "stock_name"),
+    )
+    previousPrice: Optional[float] = Field(
+        None,
+        validation_alias=AliasChoices("previousPrice", "previous_price"),
+    )
+    previousChangePct: Optional[float] = Field(
+        None,
+        validation_alias=AliasChoices("previousChangePct", "previous_change_pct"),
+    )
+    previousAnalysisSummary: Optional[Any] = Field(
+        None,
+        validation_alias=AliasChoices(
+            "previousAnalysisSummary",
+            "previous_analysis_summary",
+        ),
+    )
+    previousStrategy: Optional[Any] = Field(
+        None,
+        validation_alias=AliasChoices("previousStrategy", "previous_strategy"),
+    )
+
+
+class ChatSessionContextResponse(ChatSessionContextPayload):
+    createdAt: Optional[str] = None
+    updatedAt: Optional[str] = None
+
+
+def _context_get(context: Dict[str, Any], camel_key: str, snake_key: str) -> Any:
+    if camel_key in context:
+        return context.get(camel_key)
+    return context.get(snake_key)
+
+
+def _normalize_context_number(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_context_record_id(value: Any) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    try:
+        record_id = int(value)
+    except (TypeError, ValueError):
+        return None
+    return record_id if record_id > 0 else None
+
+
+def _normalize_persistable_chat_context(
+    context: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Return whitelisted snake_case context when it can be persisted."""
+    if not isinstance(context, dict):
+        return None
+    source_type = _context_get(context, "sourceType", "source_type")
+    if source_type != "analysis_report":
+        return None
+    source_record_id = _normalize_context_record_id(
+        _context_get(context, "sourceRecordId", "source_record_id")
+    )
+    stock_code = _context_get(context, "stockCode", "stock_code")
+    if not source_record_id or not stock_code:
+        return None
+
+    return {
+        "source_type": "analysis_report",
+        "source_record_id": source_record_id,
+        "stock_code": str(stock_code),
+        "stock_name": _context_get(context, "stockName", "stock_name"),
+        "previous_price": _normalize_context_number(
+            _context_get(context, "previousPrice", "previous_price")
+        ),
+        "previous_change_pct": _normalize_context_number(
+            _context_get(context, "previousChangePct", "previous_change_pct")
+        ),
+        "previous_analysis_summary": _context_get(
+            context,
+            "previousAnalysisSummary",
+            "previous_analysis_summary",
+        ),
+        "previous_strategy": _context_get(context, "previousStrategy", "previous_strategy"),
+    }
+
+
+def _normalize_legacy_chat_context(
+    context: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Normalize one-shot legacy context for LLM injection without persistence."""
+    if not isinstance(context, dict):
+        return None
+    stock_code = _context_get(context, "stockCode", "stock_code")
+    has_context = any(
+        _context_get(context, camel_key, snake_key) is not None
+        for camel_key, snake_key in (
+            ("stockCode", "stock_code"),
+            ("stockName", "stock_name"),
+            ("previousPrice", "previous_price"),
+            ("previousChangePct", "previous_change_pct"),
+            ("previousAnalysisSummary", "previous_analysis_summary"),
+            ("previousStrategy", "previous_strategy"),
+        )
+    )
+    if not stock_code and not has_context:
+        return None
+    return {
+        "stock_code": str(stock_code) if stock_code is not None else "",
+        "stock_name": _context_get(context, "stockName", "stock_name"),
+        "previous_price": _normalize_context_number(
+            _context_get(context, "previousPrice", "previous_price")
+        ),
+        "previous_change_pct": _normalize_context_number(
+            _context_get(context, "previousChangePct", "previous_change_pct")
+        ),
+        "previous_analysis_summary": _context_get(
+            context,
+            "previousAnalysisSummary",
+            "previous_analysis_summary",
+        ),
+        "previous_strategy": _context_get(context, "previousStrategy", "previous_strategy"),
+    }
+
+
+def _context_to_executor_context(context: Dict[str, Any]) -> Dict[str, Any]:
+    executor_context: Dict[str, Any] = {}
+    for key in (
+        "source_type",
+        "source_record_id",
+        "stock_code",
+        "stock_name",
+        "previous_price",
+        "previous_change_pct",
+        "previous_analysis_summary",
+        "previous_strategy",
+    ):
+        if key in context and context.get(key) is not None:
+            executor_context[key] = context.get(key)
+    return executor_context
+
+
+def _context_to_response(context: Dict[str, Any]) -> ChatSessionContextResponse:
+    return ChatSessionContextResponse(
+        sourceType=context.get("source_type") or "analysis_report",
+        sourceRecordId=int(context.get("source_record_id")),
+        stockCode=context.get("stock_code") or "",
+        stockName=context.get("stock_name"),
+        previousPrice=context.get("previous_price"),
+        previousChangePct=context.get("previous_change_pct"),
+        previousAnalysisSummary=context.get("previous_analysis_summary"),
+        previousStrategy=context.get("previous_strategy"),
+        createdAt=context.get("created_at"),
+        updatedAt=context.get("updated_at"),
+    )
+
+
+def _payload_to_storage_context(payload: ChatSessionContextPayload) -> Dict[str, Any]:
+    return {
+        "source_type": payload.sourceType,
+        "source_record_id": payload.sourceRecordId,
+        "stock_code": payload.stockCode,
+        "stock_name": payload.stockName,
+        "previous_price": payload.previousPrice,
+        "previous_change_pct": payload.previousChangePct,
+        "previous_analysis_summary": payload.previousAnalysisSummary,
+        "previous_strategy": payload.previousStrategy,
+    }
+
+
+def _context_ref_matches(
+    left: Optional[Dict[str, Any]],
+    right: Optional[Dict[str, Any]],
+) -> bool:
+    if not left or not right:
+        return False
+    return (
+        left.get("source_type") == right.get("source_type")
+        and left.get("source_record_id") == right.get("source_record_id")
+    )
+
+
+def resolve_effective_chat_context(
+    db,
+    session_id: str,
+    request_context: Optional[Dict[str, Any]],
+) -> tuple[Optional[Dict[str, Any]], Optional[ChatSessionContextResponse]]:
+    """
+    Resolve the LLM-injected context and separately the persisted UI context.
+
+    A valid analysis_report request context is saved after checking the source
+    history record exists. Legacy one-shot context can still be injected for
+    compatibility, but it is not returned as persisted session state.
+    """
+    validate_chat_session_id(session_id)
+    persistable_context = _normalize_persistable_chat_context(request_context)
+    stored_context = db.get_conversation_context(session_id)
+    if persistable_context and _context_ref_matches(persistable_context, stored_context):
+        return _context_to_executor_context(stored_context), _context_to_response(stored_context)
+
+    if persistable_context:
+        source_record_id = persistable_context["source_record_id"]
+        if not db.get_analysis_history_by_id(source_record_id):
+            raise HTTPException(status_code=404, detail="Analysis report not found")
+        saved_context = db.save_conversation_context(session_id, persistable_context)
+        if not isinstance(saved_context, dict):
+            saved_context = persistable_context
+        return _context_to_executor_context(saved_context), _context_to_response(saved_context)
+
+    if stored_context:
+        return _context_to_executor_context(stored_context), _context_to_response(stored_context)
+
+    legacy_context = _normalize_legacy_chat_context(request_context)
+    if legacy_context:
+        return _context_to_executor_context(legacy_context), None
+    return None, None
+
 
 class SkillInfo(BaseModel):
     id: str
@@ -155,16 +404,21 @@ async def agent_chat(request: ChatRequest):
     if not config.is_agent_available():
         raise HTTPException(status_code=400, detail="Agent mode is not enabled")
         
-    session_id = request.session_id or str(uuid.uuid4())
+    session_id = validate_chat_session_id(request.session_id or str(uuid.uuid4()))
     
     try:
         skills = request.effective_skills
         executor = _build_executor(config, skills or None)
+        effective_context, _persisted_context = resolve_effective_chat_context(
+            get_db(),
+            session_id,
+            request.context,
+        )
 
         # Pass explicit skills into context for the orchestrator.
         # Direct assignment so caller-provided skills always take precedence
         # over any stale value carried in the context dict.
-        ctx = dict(request.context or {})
+        ctx = dict(effective_context or {})
         if skills is not None:
             ctx["skills"] = skills
 
@@ -182,7 +436,8 @@ async def agent_chat(request: ChatRequest):
             session_id=session_id,
             error=result.error
         )
-            
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Agent chat API failed: {e}")
         logger.exception("Agent chat error details:")
@@ -202,6 +457,7 @@ class SessionsResponse(BaseModel):
 class SessionMessagesResponse(BaseModel):
     session_id: str
     messages: List[Dict[str, Any]]
+    context: Optional[ChatSessionContextResponse] = None
 
 
 @router.get("/chat/sessions", response_model=SessionsResponse)
@@ -216,7 +472,6 @@ async def list_chat_sessions(limit: int = 50, user_id: Optional[str] = None):
             include the platform prefix, e.g. ``telegram_12345``,
             ``feishu_ou_abc``.
     """
-    from src.storage import get_db
     sessions = get_db().get_chat_sessions(
         limit=limit,
         session_prefix=user_id,
@@ -228,15 +483,51 @@ async def list_chat_sessions(limit: int = 50, user_id: Optional[str] = None):
 @router.get("/chat/sessions/{session_id}", response_model=SessionMessagesResponse)
 async def get_chat_session_messages(session_id: str, limit: int = 100):
     """获取单个会话的完整消息"""
-    from src.storage import get_db
-    messages = get_db().get_conversation_messages(session_id, limit=limit)
-    return SessionMessagesResponse(session_id=session_id, messages=messages)
+    session_id = validate_chat_session_id(session_id)
+    db = get_db()
+    messages = db.get_conversation_messages(session_id, limit=limit)
+    context = db.get_conversation_context(session_id)
+    return SessionMessagesResponse(
+        session_id=session_id,
+        messages=messages,
+        context=_context_to_response(context) if context else None,
+    )
+
+
+@router.put(
+    "/chat/sessions/{session_id}/context",
+    response_model=ChatSessionContextResponse,
+)
+async def put_chat_session_context(
+    session_id: str,
+    payload: ChatSessionContextPayload,
+):
+    """保存或覆盖会话级追问上下文。"""
+    session_id = validate_chat_session_id(session_id)
+    if payload.sourceType != "analysis_report":
+        raise HTTPException(status_code=422, detail="Unsupported context source type")
+    db = get_db()
+    if not db.get_analysis_history_by_id(payload.sourceRecordId):
+        raise HTTPException(status_code=404, detail="Analysis report not found")
+    saved_context = db.save_conversation_context(
+        session_id,
+        _payload_to_storage_context(payload),
+    )
+    return _context_to_response(saved_context)
+
+
+@router.delete("/chat/sessions/{session_id}/context")
+async def delete_chat_session_context(session_id: str):
+    """移除指定会话的追问上下文。"""
+    session_id = validate_chat_session_id(session_id)
+    count = get_db().delete_conversation_context(session_id)
+    return {"deleted": count}
 
 
 @router.delete("/chat/sessions/{session_id}")
 async def delete_chat_session(session_id: str):
     """删除指定会话"""
-    from src.storage import get_db
+    session_id = validate_chat_session_id(session_id)
     count = get_db().delete_conversation_session(session_id)
     return {"deleted": count}
 
@@ -386,14 +677,19 @@ async def agent_chat_stream(request: ChatRequest):
     if not config.is_agent_available():
         raise HTTPException(status_code=400, detail="Agent mode is not enabled")
 
-    session_id = request.session_id or str(uuid.uuid4())
+    session_id = validate_chat_session_id(request.session_id or str(uuid.uuid4()))
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
 
     # Pass explicit skills into context for the orchestrator.
     # Direct assignment so caller-provided skills always take precedence.
     skills = request.effective_skills
-    stream_ctx = dict(request.context or {})
+    effective_context, _persisted_context = resolve_effective_chat_context(
+        get_db(),
+        session_id,
+        request.context,
+    )
+    stream_ctx = dict(effective_context or {})
     if skills is not None:
         stream_ctx["skills"] = skills
 

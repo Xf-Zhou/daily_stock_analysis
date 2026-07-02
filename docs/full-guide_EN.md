@@ -829,6 +829,8 @@ System defaults to AkShare (free), also supports other data sources:
 ### AkShare (Default)
 - Free, no configuration needed
 - Data source: Eastmoney scraper
+- HK realtime quotes wrap `stock_hk_spot_em()` and fallback `stock_hk_spot()` with caller-side timeout protection: the app waits up to 30 seconds by default, then continues through fallback paths or degraded results for the current chat/analysis request
+- After an AkShare function times out, the same function enters an approximately 60-second cooldown, and at most 2 background AkShare calls may remain in flight at once, reducing service-process pressure when a third-party endpoint hangs
 
 ### Tushare Pro
 - Requires registration to get Token
@@ -1010,6 +1012,7 @@ FastAPI provides RESTful API service for configuration management and triggering
 - **Real-time Progress** - Analysis task status updates in real-time, supports parallel tasks; the regular stock-analysis path now prefers LiteLLM streaming during the LLM stage and pushes finer-grained `message/progress` updates through task SSE
 - **Market Review visibility** - After clicking Market Review, the API returns a `task_id` and the UI polls `GET /api/v1/analysis/status/{task_id}` to show progress; completed/failure states are rendered explicitly and failure messages are shown directly in the UI error area.
 - **Stock Discovery** - The Web UI can filter stocks by market, industry, and keyword, then jump into analysis or chat from quote rankings
+- **Historical report follow-up context** - Clicking "Ask AI" from a historical report creates a new chat session, saves a visible report-source card, restores it after refresh/service restart/session switch, and keeps injecting it into later Agent follow-ups
 - **Backtest Validation** - Evaluate historical analysis accuracy, query direction win rate and simulated returns
 - **API Documentation** - Visit `/docs` for Swagger UI
 
@@ -1023,6 +1026,10 @@ FastAPI provides RESTful API service for configuration management and triggering
 | `/api/v1/analysis/tasks/stream` | GET (SSE) | Subscribe to realtime task updates |
 | `/api/v1/analysis/status/{task_id}` | GET | Query task status |
 | `/api/v1/history` | GET | Query analysis history |
+| `/api/v1/agent/chat` | POST | Non-streaming Agent chat; `session_id` is limited to 1..100 safe characters matching `[A-Za-z0-9:_-]` |
+| `/api/v1/agent/chat/stream` | POST (SSE) | Streaming Agent chat; shares the same session-context resolution path as the non-streaming endpoint |
+| `/api/v1/agent/chat/sessions/{session_id}` | GET | Query one chat session and return `{session_id, messages, context}`, including context-only sessions with no messages yet |
+| `/api/v1/agent/chat/sessions/{session_id}/context` | PUT/DELETE | Save/replace or remove the session-level historical-report follow-up context; the first save verifies that `sourceRecordId` exists |
 | `/api/v1/usage/summary?period=today|month|all` | GET | Query LLM call counts and token usage grouped by call type and model |
 | `/api/v1/backtest/run` | POST | Trigger backtest |
 | `/api/v1/backtest/results` | GET | Query backtest results (paginated) |
@@ -1033,6 +1040,7 @@ FastAPI provides RESTful API service for configuration management and triggering
 | `/docs` | GET | API Swagger documentation |
 
 > Note: `POST /api/v1/analysis/analyze` supports only one stock when `async_mode=false`; batch `stock_codes` requires `async_mode=true`. The async `202` response returns a single `task_id` for one stock, or an `accepted` / `duplicates` summary for batch requests.
+> Note: Web "Ask AI" stores a session-level `analysis_report` context snapshot instead of writing it into `conversation_messages`; `previousAnalysisSummary` / `previousStrategy` are stored as JSON text and returned with their original object/string shape. Deleting the original report later does not clear an already saved snapshot, but the first `PUT context` returns 404 when `sourceRecordId` does not exist. Exporting a chat session and sending it to notification channels currently include only chat messages, not the context card.
 > Note: The first Web Stock Discovery page filters `stocks.index.json` on the frontend for market, industry, and keyword search; it does not add `/api/v1/stocks/discover`. Static industry fields are written by `scripts/generate_index_from_csv.py` from `data/stock_list_*.csv` or `data/stock_industry_overrides.csv`; `industrySource` is limited to `tushare` / `override` / `unknown`, and missing industries are grouped under `__uncategorized__`. `GET /api/v1/stocks/rankings` returns `status=ok|partial|stale|unsupported` and items with `code/name/market/industry/price/change_pct/amount/volume/source/updated_at`; `source` reports the data provider that actually returned the quotes after fallback. A-share, BSE, and HK batch quotes reuse the existing timeout, rate-limit, circuit-breaker, and cache protections, while US rankings are limited to `data/us_ranking_core_pool.csv` and use a TTL cache.
 > Note: `POST /api/v1/analysis/market-review` follows the same runtime configuration path as CLI/Bot market review (`GeminiAnalyzer(config=...)`, search setup, and prompt/rendering pipeline). The provider compatibility path prioritizes `litellm_model` and `llm_model_list`, then falls back to existing legacy keys (`GEMINI_*`, `OPENAI_*`, `ANTHROPIC_*`, `DEEPSEEK_*`) when those are not set; provider names, Base URL, and LiteLLM routing semantics are otherwise unchanged.
 > Audit note: priority and fallback are defined by `Config._load_from_env()` in `src/config.py` (`LITELLM_CONFIG` > `LLM_CHANNELS` > legacy). Regression coverage is in `tests/test_llm_channel_config.py` (configuration source parsing) and `tests/test_market_review_runtime.py` (shared runtime assembly). The endpoint lock is process/host-level only; multi-instance deployments still need external distributed idempotency controls.

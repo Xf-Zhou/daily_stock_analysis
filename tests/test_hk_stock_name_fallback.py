@@ -6,6 +6,7 @@ Covers: data_provider/akshare_fetcher.py _get_hk_realtime_quote
 """
 
 import sys
+import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -20,6 +21,7 @@ except ImportError:
     if "json_repair" not in sys.modules:
         sys.modules["json_repair"] = MagicMock()
 
+from data_provider import akshare_fetcher
 from data_provider.akshare_fetcher import AkshareFetcher
 
 
@@ -118,6 +120,28 @@ class TestHKRealtimeFallback(unittest.TestCase):
         self.assertAlmostEqual(quote.price, 368.0)
         ak_mock.stock_hk_spot.assert_called_once()
 
+    @patch("data_provider.akshare_fetcher._ak_call_with_timeout")
+    @patch("data_provider.akshare_fetcher.get_realtime_circuit_breaker")
+    def test_em_timeout_falls_back_to_spot(self, mock_cb, mock_timeout_call):
+        """stock_hk_spot_em 超时时应 fallback 到 stock_hk_spot 并记录熔断失败。"""
+        cb = _DummyCircuitBreaker()
+        mock_cb.return_value = cb
+        mock_timeout_call.side_effect = [
+            TimeoutError("stock_hk_spot_em timeout after 30s"),
+            _make_spot_df(),
+        ]
+        ak_mock = MagicMock()
+
+        with patch.dict(sys.modules, {"akshare": ak_mock}):
+            quote = self.fetcher._get_hk_realtime_quote("HK00700")
+
+        self.assertIsNotNone(quote)
+        self.assertEqual(quote.name, "腾讯控股")
+        self.assertAlmostEqual(quote.price, 368.0)
+        self.assertEqual(mock_timeout_call.call_count, 2)
+        self.assertEqual(cb.failures[0][0], "akshare_hk_em")
+        self.assertIn("timeout after 30s", str(cb.failures[0][1]))
+
     @patch("data_provider.akshare_fetcher.get_realtime_circuit_breaker")
     def test_both_fail_returns_none(self, mock_cb):
         """stock_hk_spot_em 和 stock_hk_spot 都失败时返回 None，不抛异常。"""
@@ -158,6 +182,32 @@ class TestHKRealtimeFallback(unittest.TestCase):
 
         self.assertIsNone(quote)
         ak_mock.stock_hk_spot_em.assert_not_called()
+
+    def test_ak_timeout_cooldown_skips_repeated_hanging_call(self):
+        """AkShare 调用超时后，同一函数短时间内不应继续启动新的后台线程。"""
+        started = threading.Event()
+        release = threading.Event()
+        call_count = 0
+
+        def slow_ak_call():
+            nonlocal call_count
+            call_count += 1
+            started.set()
+            release.wait(timeout=1)
+            return pd.DataFrame()
+
+        try:
+            with self.assertRaises(TimeoutError):
+                akshare_fetcher._ak_call_with_timeout(slow_ak_call, timeout=0.01)
+            self.assertTrue(started.wait(timeout=0.2))
+
+            with self.assertRaises(TimeoutError) as cm:
+                akshare_fetcher._ak_call_with_timeout(slow_ak_call, timeout=0.01)
+
+            self.assertIn("cooldown", str(cm.exception))
+            self.assertEqual(call_count, 1)
+        finally:
+            release.set()
 
 
 if __name__ == "__main__":

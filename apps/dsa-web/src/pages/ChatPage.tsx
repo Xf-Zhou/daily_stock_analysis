@@ -14,16 +14,17 @@ import {
   type ProgressStep,
 } from '../stores/agentChatStore';
 import { downloadSession, formatSessionAsMarkdown } from '../utils/chatExport';
-import type { ChatFollowUpContext } from '../utils/chatFollowUp';
 import {
   buildFollowUpPrompt,
   parseFollowUpRecordId,
   resolveChatFollowUpContext,
+  sanitizeFollowUpSessionId,
   sanitizeFollowUpStockCode,
   sanitizeFollowUpStockName,
 } from '../utils/chatFollowUp';
 import { isNearBottom } from '../utils/chatScroll';
 import { getReportText } from '../utils/reportLanguage';
+import { generateUUID } from '../utils/uuid';
 
 // Quick question examples shown on empty state
 const QUICK_QUESTIONS = [
@@ -46,6 +47,30 @@ const getMessageSkillNames = (msg: Message): string[] => {
 };
 
 const getMessageSkillLabel = (msg: Message): string => getMessageSkillNames(msg).join('、');
+
+const formatContextNumber = (value: number | null | undefined): string | null => {
+  if (value === null || value === undefined || Number.isNaN(value)) return null;
+  return Number.isInteger(value) ? String(value) : String(value);
+};
+
+const stringifyContextField = (value: unknown): string | null => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value !== 'object') return String(value);
+  const record = value as Record<string, unknown>;
+  const preferred =
+    record.operationAdvice ||
+    record.analysisSummary ||
+    record.trendPrediction ||
+    record.stopLoss ||
+    record.takeProfit;
+  if (preferred !== undefined && preferred !== null) return String(preferred);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
 
 const ChatPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -70,7 +95,6 @@ const ChatPage: React.FC = () => {
   const isMountedRef = useRef(true);
   const sendToastTimerRef = useRef<number | null>(null);
   const followUpHydrationTokenRef = useRef(0);
-  const followUpContextRef = useRef<ChatFollowUpContext | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const pendingScrollBehaviorRef = useRef<ScrollBehavior>('auto');
 
@@ -97,8 +121,11 @@ const ChatPage: React.FC = () => {
     document.title = '问股 - DSA';
   }, []);
 
-  useEffect(() => () => {
-    isMountedRef.current = false;
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
   }, []);
 
   const {
@@ -108,12 +135,15 @@ const ChatPage: React.FC = () => {
     sessionId,
     sessions,
     sessionsLoading,
+    currentContext,
+    contextLoading,
     chatError,
     loadSessions,
     loadInitialSession,
     switchSession,
     startStream,
     clearCompletionBadge,
+    removeContext,
   } = useAgentChatStore();
 
   const syncScrollState = useCallback(() => {
@@ -197,6 +227,7 @@ const ChatPage: React.FC = () => {
   const quickQuestions = QUICK_QUESTIONS.filter((question) => availableSkillIds.size === 0 || availableSkillIds.has(question.skill));
   const selectedSkillIdSet = new Set(selectedSkillIds);
   const skillLimitReached = selectedSkillIds.length >= MAX_SELECTED_SKILLS;
+  const isContextBusy = isFollowUpContextLoading || contextLoading;
 
   const getSkillNames = useCallback(
     (skillIds: string[]) => skillIds.map((id) => skills.find((s) => s.id === id)?.name || id),
@@ -227,13 +258,15 @@ const ChatPage: React.FC = () => {
   }, []);
 
   const handleStartNewChat = useCallback(() => {
-    followUpContextRef.current = null;
+    followUpHydrationTokenRef.current += 1;
     requestScrollToBottom('auto');
     useAgentChatStore.getState().startNewChat();
     setSidebarOpen(false);
   }, [requestScrollToBottom]);
 
   const handleSwitchSession = useCallback((targetSessionId: string) => {
+    followUpHydrationTokenRef.current += 1;
+    setIsFollowUpContextLoading(false);
     requestScrollToBottom('auto');
     switchSession(targetSessionId);
     setSidebarOpen(false);
@@ -259,6 +292,7 @@ const ChatPage: React.FC = () => {
     const stock = sanitizeFollowUpStockCode(searchParams.get('stock'));
     const name = sanitizeFollowUpStockName(searchParams.get('name'));
     const recordId = parseFollowUpRecordId(searchParams.get('recordId'));
+    const requestedSessionId = sanitizeFollowUpSessionId(searchParams.get('sessionId'));
 
     if (!stock) {
       setSearchParams({}, { replace: true });
@@ -266,11 +300,9 @@ const ChatPage: React.FC = () => {
     }
 
     const hydrationToken = ++followUpHydrationTokenRef.current;
+    const followUpSessionId = requestedSessionId || generateUUID();
+    useAgentChatStore.getState().startNewChat(followUpSessionId);
     setInput(buildFollowUpPrompt(stock, name));
-    followUpContextRef.current = {
-      stock_code: stock,
-      stock_name: name,
-    };
     if (recordId !== undefined) {
       setIsFollowUpContextLoading(true);
     }
@@ -278,11 +310,18 @@ const ChatPage: React.FC = () => {
       stockCode: stock,
       stockName: name,
       recordId,
-    }).then((context) => {
+    }).then(async (context) => {
       if (!isMountedRef.current || followUpHydrationTokenRef.current !== hydrationToken) {
         return;
       }
-      followUpContextRef.current = context;
+      if (useAgentChatStore.getState().sessionId !== followUpSessionId) {
+        return;
+      }
+      if (context) {
+        await useAgentChatStore.getState().saveContext(context);
+      }
+    }).catch((error) => {
+      console.error('Failed to hydrate follow-up context:', error);
     }).finally(() => {
       if (isMountedRef.current && followUpHydrationTokenRef.current === hydrationToken) {
         setIsFollowUpContextLoading(false);
@@ -294,18 +333,18 @@ const ChatPage: React.FC = () => {
   const handleSend = useCallback(
     async (overrideMessage?: string, overrideSkillIds?: string[]) => {
       const msgText = (overrideMessage ?? input).trim();
-      if (!msgText || loading) return;
+      if (!msgText || loading || isContextBusy) return;
       const usedSkillIds = normalizeSelectedSkillIds(overrideSkillIds ?? selectedSkillIds);
       const usedSkillNames = usedSkillIds.length > 0 ? getSkillNames(usedSkillIds) : ['通用'];
+      const latestChatState = useAgentChatStore.getState();
 
       const payload = {
         message: msgText,
-        session_id: sessionId,
+        session_id: latestChatState.sessionId,
         ...(usedSkillIds.length > 0 ? { skills: usedSkillIds } : {}),
-        context: followUpContextRef.current ?? undefined,
+        context: undefined,
       };
       followUpHydrationTokenRef.current += 1;
-      followUpContextRef.current = null;
       setIsFollowUpContextLoading(false);
 
       setInput('');
@@ -315,8 +354,19 @@ const ChatPage: React.FC = () => {
         skillName: usedSkillNames.join('、'),
       });
     },
-    [getSkillNames, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, sessionId, startStream],
+    [getSkillNames, input, isContextBusy, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, startStream],
   );
+
+  const handleRemoveContext = useCallback(() => {
+    followUpHydrationTokenRef.current += 1;
+    setIsFollowUpContextLoading(false);
+    void removeContext();
+  }, [removeContext]);
+
+  const contextPrice = formatContextNumber(currentContext?.previousPrice);
+  const contextChangePct = formatContextNumber(currentContext?.previousChangePct);
+  const contextSummary = stringifyContextField(currentContext?.previousAnalysisSummary);
+  const contextStrategy = stringifyContextField(currentContext?.previousStrategy);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -954,10 +1004,61 @@ const ChatPage: React.FC = () => {
               {isFollowUpContextLoading ? (
                 <InlineAlert
                   variant="info"
-                  title="追问上下文加载中"
-                  message="正在加载历史分析上下文；现在可直接发送追问。"
+                  title="正在加载历史报告..."
+                  message="正在加载历史分析报告上下文；加载完成后会带着原报告追问。"
                   className="rounded-xl px-3 py-2 text-xs shadow-none"
                 />
+              ) : null}
+              {currentContext ? (
+                <div
+                  className="rounded-xl border border-cyan/25 bg-cyan/5 px-3.5 py-3 text-sm shadow-none"
+                  data-testid="chat-session-context-card"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-foreground">
+                          基于历史报告 #{currentContext.sourceRecordId} 追问
+                        </span>
+                        <Badge variant="info" className="shadow-none">
+                          {currentContext.sourceType === 'analysis_report' ? '历史报告' : currentContext.sourceType}
+                        </Badge>
+                      </div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-secondary-text">
+                        <span className="font-medium text-foreground">
+                          {currentContext.stockName
+                            ? `${currentContext.stockName}(${currentContext.stockCode})`
+                            : currentContext.stockCode}
+                        </span>
+                        {contextPrice !== null ? <span>上次价格 {contextPrice}</span> : null}
+                        {contextChangePct !== null ? <span>涨跌幅 {contextChangePct}%</span> : null}
+                      </div>
+                      {(contextSummary || contextStrategy) ? (
+                        <div className="grid gap-1 text-xs text-secondary-text sm:grid-cols-2">
+                          {contextSummary ? (
+                            <p className="min-w-0 truncate">
+                              <span className="text-muted-text">上次结论：</span>
+                              {contextSummary}
+                            </p>
+                          ) : null}
+                          {contextStrategy ? (
+                            <p className="min-w-0 truncate">
+                              <span className="text-muted-text">策略点位：</span>
+                              {contextStrategy}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="chat-copy-btn flex-shrink-0"
+                      onClick={handleRemoveContext}
+                    >
+                      移除上下文
+                    </button>
+                  </div>
+                </div>
               ) : null}
             {skills.length > 0 && (
               <div className="flex flex-wrap items-start gap-x-5 gap-y-2">
@@ -1021,7 +1122,7 @@ const ChatPage: React.FC = () => {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="例如：分析 600519 / 茅台现在适合买入吗？ (Enter 发送, Shift+Enter 换行)"
-                  disabled={loading}
+                  disabled={loading || isContextBusy}
                   rows={1}
                   className="input-surface input-focus-glow flex-1 min-h-[44px] max-h-[200px] rounded-xl border bg-transparent px-4 py-2.5 text-sm transition-all focus:outline-none resize-none disabled:cursor-not-allowed disabled:opacity-60"
                   style={{ height: 'auto' }}
@@ -1034,8 +1135,8 @@ const ChatPage: React.FC = () => {
                 <Button
                   variant="primary"
                   onClick={() => handleSend()}
-                  disabled={!input.trim() || loading}
-                  isLoading={loading}
+                  disabled={!input.trim() || loading || isContextBusy}
+                  isLoading={loading || isContextBusy}
                   className="btn-primary flex-shrink-0"
                 >
                   发送

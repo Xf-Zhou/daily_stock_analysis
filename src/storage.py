@@ -608,6 +608,25 @@ class ConversationMessage(Base):
     created_at = Column(DateTime, default=datetime.now, index=True)
 
 
+class ConversationContext(Base):
+    """会话级追问上下文快照，不写入聊天消息正文。"""
+
+    __tablename__ = 'conversation_contexts'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(100), unique=True, index=True, nullable=False)
+    source_type = Column(String(32), nullable=False, default="analysis_report")
+    source_record_id = Column(Integer, index=True, nullable=True)
+    stock_code = Column(String(32), nullable=False)
+    stock_name = Column(String(100), nullable=True)
+    previous_price = Column(Float, nullable=True)
+    previous_change_pct = Column(Float, nullable=True)
+    previous_analysis_summary = Column(Text, nullable=True)
+    previous_strategy = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
+
+
 class LLMUsage(Base):
     """One row per litellm.completion() call — token-usage audit log."""
 
@@ -1883,6 +1902,108 @@ class DatabaseManager:
             )
             session.add(msg)
 
+    @staticmethod
+    def _encode_conversation_context_value(value: Any) -> Optional[str]:
+        """Store context JSON fields as JSON text while preserving scalar strings."""
+        if value is None:
+            return None
+        return json.dumps(value, ensure_ascii=False)
+
+    @staticmethod
+    def _decode_conversation_context_value(value: Optional[str]) -> Any:
+        if value is None:
+            return None
+        try:
+            return json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            return value
+
+    @classmethod
+    def _conversation_context_to_dict(cls, context: ConversationContext) -> Dict[str, Any]:
+        return {
+            "session_id": context.session_id,
+            "source_type": context.source_type,
+            "source_record_id": context.source_record_id,
+            "stock_code": context.stock_code,
+            "stock_name": context.stock_name,
+            "previous_price": context.previous_price,
+            "previous_change_pct": context.previous_change_pct,
+            "previous_analysis_summary": cls._decode_conversation_context_value(
+                context.previous_analysis_summary
+            ),
+            "previous_strategy": cls._decode_conversation_context_value(
+                context.previous_strategy
+            ),
+            "created_at": context.created_at.isoformat() if context.created_at else None,
+            "updated_at": context.updated_at.isoformat() if context.updated_at else None,
+        }
+
+    def save_conversation_context(
+        self,
+        session_id: str,
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        保存或覆盖会话级追问上下文。
+        """
+        with self.session_scope() as session:
+            existing = session.execute(
+                select(ConversationContext).where(
+                    ConversationContext.session_id == session_id
+                )
+            ).scalar_one_or_none()
+            now = datetime.now()
+            values = {
+                "source_type": context.get("source_type") or "analysis_report",
+                "source_record_id": context.get("source_record_id"),
+                "stock_code": context.get("stock_code") or "",
+                "stock_name": context.get("stock_name"),
+                "previous_price": context.get("previous_price"),
+                "previous_change_pct": context.get("previous_change_pct"),
+                "previous_analysis_summary": self._encode_conversation_context_value(
+                    context.get("previous_analysis_summary")
+                ),
+                "previous_strategy": self._encode_conversation_context_value(
+                    context.get("previous_strategy")
+                ),
+                "updated_at": now,
+            }
+            if existing is None:
+                existing = ConversationContext(
+                    session_id=session_id,
+                    created_at=now,
+                    **values,
+                )
+                session.add(existing)
+            else:
+                for key, value in values.items():
+                    setattr(existing, key, value)
+            session.flush()
+            session.refresh(existing)
+            return self._conversation_context_to_dict(existing)
+
+    def get_conversation_context(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """获取会话级追问上下文。"""
+        with self.session_scope() as session:
+            context = session.execute(
+                select(ConversationContext).where(
+                    ConversationContext.session_id == session_id
+                )
+            ).scalar_one_or_none()
+            if context is None:
+                return None
+            return self._conversation_context_to_dict(context)
+
+    def delete_conversation_context(self, session_id: str) -> int:
+        """删除指定会话的追问上下文。"""
+        with self.session_scope() as session:
+            result = session.execute(
+                delete(ConversationContext).where(
+                    ConversationContext.session_id == session_id
+                )
+            )
+            return result.rowcount or 0
+
     def get_conversation_history(self, session_id: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
         获取 Agent 对话历史
@@ -1913,7 +2034,7 @@ class DatabaseManager:
         extra_session_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
-        获取聊天会话列表（从 conversation_messages 聚合）
+        获取聊天会话列表（合并消息会话和 context-only 会话）
 
         Args:
             limit: Maximum number of sessions to return.
@@ -1934,7 +2055,9 @@ class DatabaseManager:
                 normalized_prefix = session_prefix if session_prefix.endswith(":") else f"{session_prefix}:"
             exact_ids = [sid for sid in (extra_session_ids or []) if sid]
 
-            # 聚合每个 session 的消息数和最后活跃时间
+            candidate_limit = max(int(limit or 50), len(exact_ids), 1)
+
+            # 聚合每个 session 的消息数和最后活跃时间；先取候选，合并 context 后再统一截断。
             base = (
                 select(
                     ConversationMessage.session_id,
@@ -1954,34 +2077,115 @@ class DatabaseManager:
                 base
                 .group_by(ConversationMessage.session_id)
                 .order_by(desc(func.max(ConversationMessage.created_at)))
-                .limit(limit)
+                .limit(candidate_limit)
             )
             rows = session.execute(stmt).all()
 
-            results = []
+            results_by_session: Dict[str, Dict[str, Any]] = {}
             for row in rows:
                 sid = row.session_id
-                # 取该会话第一条 user 消息作为标题
-                first_user_msg = session.execute(
-                    select(ConversationMessage.content)
-                    .where(
-                        and_(
-                            ConversationMessage.session_id == sid,
-                            ConversationMessage.role == "user",
-                        )
-                    )
-                    .order_by(ConversationMessage.created_at)
-                    .limit(1)
-                ).scalar()
-                title = (first_user_msg or "新对话")[:60]
 
-                results.append({
+                results_by_session[sid] = {
                     "session_id": sid,
-                    "title": title,
+                    "title": "新对话",
                     "message_count": row.message_count,
                     "created_at": row.created_at.isoformat() if row.created_at else None,
                     "last_active": row.last_active.isoformat() if row.last_active else None,
-                })
+                    "_last_active_dt": row.last_active,
+                }
+
+            context_base = select(ConversationContext)
+            context_conditions = []
+            if normalized_prefix:
+                context_conditions.append(ConversationContext.session_id.startswith(normalized_prefix))
+            if exact_ids:
+                context_conditions.append(ConversationContext.session_id.in_(exact_ids))
+            if context_conditions:
+                context_base = context_base.where(or_(*context_conditions))
+            context_base = (
+                context_base
+                .order_by(desc(func.coalesce(ConversationContext.updated_at, ConversationContext.created_at)))
+                .limit(candidate_limit)
+            )
+            context_rows = session.execute(context_base).scalars().all()
+
+            for context in context_rows:
+                last_active_dt = context.updated_at or context.created_at
+                sid = context.session_id
+                existing = results_by_session.get(sid)
+                if existing:
+                    existing_dt = existing.get("_last_active_dt")
+                    if last_active_dt and (existing_dt is None or last_active_dt > existing_dt):
+                        existing["_last_active_dt"] = last_active_dt
+                        existing["last_active"] = last_active_dt.isoformat()
+                    if not existing.get("created_at") and context.created_at:
+                        existing["created_at"] = context.created_at.isoformat()
+                    continue
+
+                stock_name = context.stock_name or context.stock_code
+                results_by_session[sid] = {
+                    "session_id": sid,
+                    "title": f"追问 {stock_name}({context.stock_code})",
+                    "message_count": 0,
+                    "created_at": context.created_at.isoformat() if context.created_at else None,
+                    "last_active": last_active_dt.isoformat() if last_active_dt else None,
+                    "_last_active_dt": last_active_dt,
+                }
+
+            results = sorted(
+                results_by_session.values(),
+                key=lambda item: item.get("_last_active_dt") or datetime.min,
+                reverse=True,
+            )[:limit]
+
+            final_session_ids = [item["session_id"] for item in results]
+            message_stats: Dict[str, Any] = {}
+            if final_session_ids:
+                stats_rows = session.execute(
+                    select(
+                        ConversationMessage.session_id,
+                        func.count(ConversationMessage.id).label("message_count"),
+                        func.min(ConversationMessage.created_at).label("created_at"),
+                        func.max(ConversationMessage.created_at).label("last_active"),
+                    )
+                    .where(ConversationMessage.session_id.in_(final_session_ids))
+                    .group_by(ConversationMessage.session_id)
+                ).all()
+                message_stats = {row.session_id: row for row in stats_rows}
+
+            first_user_titles: Dict[str, str] = {}
+            title_session_ids = [sid for sid in final_session_ids if sid in message_stats]
+            if title_session_ids:
+                title_rows = session.execute(
+                    select(ConversationMessage.session_id, ConversationMessage.content)
+                    .where(
+                        and_(
+                            ConversationMessage.session_id.in_(title_session_ids),
+                            ConversationMessage.role == "user",
+                        )
+                    )
+                    .order_by(ConversationMessage.session_id, ConversationMessage.created_at)
+                ).all()
+                for sid, content in title_rows:
+                    if sid not in first_user_titles:
+                        first_user_titles[sid] = content
+
+            for item in results:
+                sid = item["session_id"]
+                stats = message_stats.get(sid)
+                if stats:
+                    item["title"] = (first_user_titles.get(sid) or "新对话")[:60]
+                    item["message_count"] = stats.message_count
+                    if stats.created_at:
+                        item["created_at"] = stats.created_at.isoformat()
+                    stats_last_active = stats.last_active
+                    current_last_active = item.get("_last_active_dt")
+                    if stats_last_active and (
+                        current_last_active is None or stats_last_active > current_last_active
+                    ):
+                        item["_last_active_dt"] = stats_last_active
+                        item["last_active"] = stats_last_active.isoformat()
+                item.pop("_last_active_dt", None)
             return results
 
     def get_conversation_messages(self, session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
@@ -2008,7 +2212,7 @@ class DatabaseManager:
 
     def delete_conversation_session(self, session_id: str) -> int:
         """
-        删除指定会话的所有消息
+        删除指定会话的所有消息和追问上下文
 
         Returns:
             删除的消息数
@@ -2019,7 +2223,12 @@ class DatabaseManager:
                     ConversationMessage.session_id == session_id
                 )
             )
-            return result.rowcount
+            session.execute(
+                delete(ConversationContext).where(
+                    ConversationContext.session_id == session_id
+                )
+            )
+            return result.rowcount or 0
 
     # ------------------------------------------------------------------
     # LLM usage tracking

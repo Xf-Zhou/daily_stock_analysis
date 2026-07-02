@@ -49,6 +49,25 @@ export interface ChatSessionMessage {
   created_at: string | null;
 }
 
+export interface ChatSessionContext {
+  sourceType: 'analysis_report';
+  sourceRecordId: number;
+  stockCode: string;
+  stockName: string | null;
+  previousPrice?: number | null;
+  previousChangePct?: number | null;
+  previousAnalysisSummary?: unknown;
+  previousStrategy?: unknown;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface ChatSessionDetail {
+  session_id: string;
+  messages: ChatSessionMessage[];
+  context: ChatSessionContext | null;
+}
+
 export const agentApi = {
   async chat(payload: ChatRequest): Promise<ChatResponse> {
     const response = await apiClient.post<ChatResponse>('/api/v1/agent/chat', payload, {
@@ -64,9 +83,26 @@ export const agentApi = {
     const response = await apiClient.get<{ sessions: ChatSessionItem[] }>('/api/v1/agent/chat/sessions', { params: { limit } });
     return response.data.sessions;
   },
+  async getChatSessionDetail(sessionId: string): Promise<ChatSessionDetail> {
+    const response = await apiClient.get<ChatSessionDetail>(`/api/v1/agent/chat/sessions/${sessionId}`);
+    return response.data;
+  },
   async getChatSessionMessages(sessionId: string): Promise<ChatSessionMessage[]> {
-    const response = await apiClient.get<{ messages: ChatSessionMessage[] }>(`/api/v1/agent/chat/sessions/${sessionId}`);
-    return response.data.messages;
+    const detail = await this.getChatSessionDetail(sessionId);
+    return detail.messages;
+  },
+  async saveChatSessionContext(
+    sessionId: string,
+    context: ChatSessionContext,
+  ): Promise<ChatSessionContext> {
+    const response = await apiClient.put<ChatSessionContext>(
+      `/api/v1/agent/chat/sessions/${sessionId}/context`,
+      context,
+    );
+    return response.data;
+  },
+  async deleteChatSessionContext(sessionId: string): Promise<void> {
+    await apiClient.delete(`/api/v1/agent/chat/sessions/${sessionId}/context`);
   },
   async deleteChatSession(sessionId: string): Promise<void> {
     await apiClient.delete(`/api/v1/agent/chat/sessions/${sessionId}`);

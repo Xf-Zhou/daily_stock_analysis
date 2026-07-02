@@ -15,6 +15,7 @@ import { useDashboardLifecycle, useHomeDashboardState } from '../hooks';
 import type { SelectionSource } from '../types/analysis';
 import type { SetupStatusResponse } from '../types/systemConfig';
 import { getReportText, normalizeReportLanguage } from '../utils/reportLanguage';
+import { generateUUID } from '../utils/uuid';
 
 type MarketReviewNotice = {
   variant: 'success' | 'warning' | 'danger';
@@ -169,7 +170,8 @@ const HomePage: React.FC = () => {
     const code = selectedReport.meta.stockCode;
     const name = selectedReport.meta.stockName;
     const rid = selectedReport.meta.id;
-    navigate(`/chat?stock=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&recordId=${rid}`);
+    const sessionId = generateUUID();
+    navigate(`/chat?stock=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&recordId=${rid}&sessionId=${encodeURIComponent(sessionId)}`);
   }, [navigate, selectedReport]);
 
   const handleReanalyze = useCallback(() => {

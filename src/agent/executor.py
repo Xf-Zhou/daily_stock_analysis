@@ -562,7 +562,6 @@ class AgentExecutor:
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
         ]
-        messages.extend(history)
 
         # Inject previous analysis context if provided (data reuse from report follow-up)
         if context:
@@ -571,9 +570,11 @@ class AgentExecutor:
                 context_parts.append(f"股票代码: {context['stock_code']}")
             if context.get("stock_name"):
                 context_parts.append(f"股票名称: {context['stock_name']}")
-            if context.get("previous_price"):
+            if context.get("source_record_id") is not None:
+                context_parts.append(f"历史报告ID: {context['source_record_id']}")
+            if context.get("previous_price") is not None:
                 context_parts.append(f"上次分析价格: {context['previous_price']}")
-            if context.get("previous_change_pct"):
+            if context.get("previous_change_pct") is not None:
                 context_parts.append(f"上次涨跌幅: {context['previous_change_pct']}%")
             if context.get("previous_analysis_summary"):
                 summary = context["previous_analysis_summary"]
@@ -585,8 +586,9 @@ class AgentExecutor:
                 context_parts.append(f"上次策略分析:\n{strategy_text}")
             if context_parts:
                 context_msg = "[系统提供的历史分析上下文，可供参考对比]\n" + "\n".join(context_parts)
-                messages.append({"role": "user", "content": context_msg})
-                messages.append({"role": "assistant", "content": "好的，我已了解该股票的历史分析数据。请告诉我你想了解什么？"})
+                messages.append({"role": "system", "content": context_msg})
+
+        messages.extend(history)
 
         messages.append({"role": "user", "content": message})
 

@@ -935,6 +935,8 @@ PUSHOVER_API_TOKEN=your_api_token
 ### AkShare（默认）
 - 免费，无需配置
 - 数据来源：东方财富爬虫
+- 港股实时行情会对 `stock_hk_spot_em()` 与备用 `stock_hk_spot()` 做调用方超时保护：默认最多等待 30 秒，超时后本次问股/分析会继续走备用链路或降级返回
+- AkShare 调用超时后，同一函数会进入约 60 秒冷却期，并限制最多 2 个后台 AkShare 调用同时挂起，避免第三方接口卡死时拖慢服务进程
 
 ### Tushare Pro
 - 需要注册获取 Token
@@ -1151,6 +1153,7 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 - 📊 **实时进度** - 分析任务状态实时更新，支持多任务并行；普通分析链路在进入 LLM 阶段后会优先尝试 LiteLLM 流式生成，并通过任务 SSE 回灌更细粒度的 `message/progress`
 - 🗂️ **大盘复盘任务可见性** - 首页触发大盘复盘后会返回 `task_id` 并轮询 `GET /api/v1/analysis/status/{task_id}`，在进行中/完成/失败场景给出可见反馈，失败时直接透出报错内容
 - 🔎 **股票发现** - Web 端可按市场、行业、关键词筛选股票，并通过行情榜单进入分析或问股
+- 🤖 **历史报告追问上下文** - 首页历史报告的「追问 AI」会创建新的问股会话，保存报告来源卡片，刷新、服务重启或切换历史会话后仍可恢复，并持续注入给后续追问
 - 📈 **回测验证** - 评估历史分析准确率，查询方向胜率与模拟收益
 - 🔗 **API 文档** - 访问 `/docs` 查看 Swagger UI
 
@@ -1164,6 +1167,10 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 | `/api/v1/analysis/tasks/stream` | GET (SSE) | 订阅任务实时状态流 |
 | `/api/v1/analysis/status/{task_id}` | GET | 查询任务状态 |
 | `/api/v1/history` | GET | 查询分析历史 |
+| `/api/v1/agent/chat` | POST | 非流式 Agent 问股；`session_id` 仅允许 1..100 位 `[A-Za-z0-9:_-]` 安全字符 |
+| `/api/v1/agent/chat/stream` | POST (SSE) | 流式 Agent 问股；与非流式接口共用会话上下文解析 |
+| `/api/v1/agent/chat/sessions/{session_id}` | GET | 查询单个问股会话，返回 `{session_id, messages, context}`，支持仅有上下文、尚无消息的会话 |
+| `/api/v1/agent/chat/sessions/{session_id}/context` | PUT/DELETE | 保存/覆盖或移除会话级历史报告追问上下文；首次保存会校验 `sourceRecordId` 对应历史报告存在 |
 | `/api/v1/usage/summary?period=today|month|all` | GET | 按调用类型与模型维度汇总 LLM 调用次数和 Token 用量 |
 | `/api/v1/backtest/run` | POST | 触发回测 |
 | `/api/v1/backtest/results` | GET | 查询回测结果（分页） |
@@ -1176,6 +1183,7 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 | `/docs` | GET | API Swagger 文档 |
 
 > 说明：`POST /api/v1/analysis/analyze` 在 `async_mode=false` 时仅支持单只股票；批量 `stock_codes` 需使用 `async_mode=true`。异步 `202` 响应对单股返回 `task_id`，对批量返回 `accepted` / `duplicates` 汇总结构。
+> 说明：Web「追问 AI」保存的是会话级 `analysis_report` 上下文快照，不写入 `conversation_messages`；`previousAnalysisSummary` / `previousStrategy` 以 JSON 文本存储并按原始 object/string 形态返回。原报告后续删除不会清空已保存快照，但首次 `PUT context` 时若 `sourceRecordId` 不存在会返回 404。导出会话和发送通知第一版只包含聊天消息正文，不包含上下文卡片内容。
 > 说明：Web「股票发现」页第一版基于 `stocks.index.json` 在前端完成市场、行业与关键词筛选，不新增 `/api/v1/stocks/discover`。行业字段由 `scripts/generate_index_from_csv.py` 从 `data/stock_list_*.csv` 或 `data/stock_industry_overrides.csv` 静态写入；`industrySource` 仅使用 `tushare` / `override` / `unknown`，缺失行业归入 `__uncategorized__`。`GET /api/v1/stocks/rankings` 返回 `status=ok|partial|stale|unsupported`，字段包含 `code/name/market/industry/price/change_pct/amount/volume/source/updated_at`，其中 `source` 表示实际成功返回行情的数据源；A 股/北交所/港股批量行情复用现有超时、限流、熔断和缓存保护，美股榜单仅覆盖 `data/us_ranking_core_pool.csv` 核心池并使用 TTL 缓存。
 > 说明：`POST /api/v1/analysis/market-review` 采用后端与 CLI/Bot 共用的配置路径（`GeminiAnalyzer(config=...)` 与同样的搜索/提示词构造入口）。Provider 兼容路由会优先识别并使用 `litellm_model`、`llm_model_list`，若未配置则回退 legacy `GEMINI_*`、`OPENAI_*`、`ANTHROPIC_*`、`DEEPSEEK_*` 键；不会新增/调整 provider、Base URL 或 LiteLLM 路由语义。
 > 审计依据：优先级与回退语义以 `src/config.py` 的 `Config._load_from_env()` 为准（`LITELLM_CONFIG` > `LLM_CHANNELS` > legacy）。配套回归见 `tests/test_llm_channel_config.py`（配置源解析）与 `tests/test_market_review_runtime.py`（共享装配路径）。该接口当前仅提供单进程/单机级防重复能力，若为多实例部署需通过外部任务队列或分布式锁补齐全局幂等。

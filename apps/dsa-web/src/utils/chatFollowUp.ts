@@ -1,15 +1,9 @@
 import type { AnalysisReport } from '../types/analysis';
 import { historyApi } from '../api/history';
+import type { ChatSessionContext } from '../api/agent';
 import { validateStockCode } from './validation';
 
-export interface ChatFollowUpContext {
-  stock_code: string;
-  stock_name: string | null;
-  previous_analysis_summary?: unknown;
-  previous_strategy?: unknown;
-  previous_price?: number;
-  previous_change_pct?: number;
-}
+export type ChatFollowUpContext = ChatSessionContext;
 
 type ResolveChatFollowUpContextParams = {
   stockCode: string;
@@ -18,6 +12,7 @@ type ResolveChatFollowUpContextParams = {
 };
 
 const MAX_FOLLOW_UP_NAME_LENGTH = 80;
+const CHAT_SESSION_ID_PATTERN = /^[A-Za-z0-9:_-]{1,100}$/;
 
 function hasInvalidFollowUpNameCharacter(value: string): boolean {
   return Array.from(value).some((character) => {
@@ -64,6 +59,11 @@ export function parseFollowUpRecordId(recordId: string | null): number | undefin
   return parsed;
 }
 
+export function sanitizeFollowUpSessionId(sessionId: string | null): string | null {
+  const normalized = sessionId?.trim() ?? '';
+  return CHAT_SESSION_ID_PATTERN.test(normalized) ? normalized : null;
+}
+
 export function buildFollowUpPrompt(stockCode: string, stockName: string | null): string {
   const displayName = stockName ? `${stockName}(${stockCode})` : stockCode;
   return `请深入分析 ${displayName}`;
@@ -72,28 +72,31 @@ export function buildFollowUpPrompt(stockCode: string, stockName: string | null)
 export function buildChatFollowUpContext(
   stockCode: string,
   stockName: string | null,
+  recordId: number,
   report?: AnalysisReport | null,
-): ChatFollowUpContext {
-  const context: ChatFollowUpContext = {
-    stock_code: stockCode,
-    stock_name: stockName,
-  };
-
+): ChatFollowUpContext | null {
   if (!report) {
-    return context;
+    return null;
   }
 
+  const context: ChatFollowUpContext = {
+    sourceType: 'analysis_report',
+    sourceRecordId: recordId,
+    stockCode,
+    stockName,
+  };
+
   if (report.summary) {
-    context.previous_analysis_summary = report.summary;
+    context.previousAnalysisSummary = report.summary;
   }
 
   if (report.strategy) {
-    context.previous_strategy = report.strategy;
+    context.previousStrategy = report.strategy;
   }
 
   if (report.meta) {
-    context.previous_price = report.meta.currentPrice;
-    context.previous_change_pct = report.meta.changePct;
+    context.previousPrice = report.meta.currentPrice;
+    context.previousChangePct = report.meta.changePct;
   }
 
   return context;
@@ -103,15 +106,15 @@ export async function resolveChatFollowUpContext({
   stockCode,
   stockName,
   recordId,
-}: ResolveChatFollowUpContextParams): Promise<ChatFollowUpContext> {
+}: ResolveChatFollowUpContextParams): Promise<ChatFollowUpContext | null> {
   if (!recordId) {
-    return buildChatFollowUpContext(stockCode, stockName);
+    return null;
   }
 
   try {
     const report = await historyApi.getDetail(recordId);
-    return buildChatFollowUpContext(stockCode, stockName, report);
+    return buildChatFollowUpContext(stockCode, stockName, recordId, report);
   } catch {
-    return buildChatFollowUpContext(stockCode, stockName);
+    return null;
   }
 }

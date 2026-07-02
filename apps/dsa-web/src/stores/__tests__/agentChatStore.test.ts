@@ -4,7 +4,10 @@ import { useAgentChatStore } from '../agentChatStore';
 vi.mock('../../api/agent', () => ({
   agentApi: {
     getChatSessions: vi.fn(async () => []),
+    getChatSessionDetail: vi.fn(async () => ({ session_id: 'session-test', messages: [], context: null })),
     getChatSessionMessages: vi.fn(async () => []),
+    saveChatSessionContext: vi.fn(async (_sessionId, context) => context),
+    deleteChatSessionContext: vi.fn(async () => undefined),
     chatStream: vi.fn(),
   },
 }));
@@ -12,6 +15,16 @@ vi.mock('../../api/agent', () => ({
 const { agentApi } = await import('../../api/agent');
 
 const encoder = new TextEncoder();
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 function createStreamResponse(lines: string[]) {
   return new Response(
@@ -38,6 +51,8 @@ describe('agentChatStore.startStream', () => {
       sessionId: 'session-test',
       sessions: [],
       sessionsLoading: false,
+      currentContext: null,
+      contextLoading: false,
       chatError: null,
       currentRoute: '/chat',
       completionBadge: false,
@@ -181,5 +196,129 @@ describe('agentChatStore.startStream', () => {
       category: 'unknown',
       rawMessage: '分析出错',
     });
+  });
+
+  it('restores a context-only session during initial load', async () => {
+    localStorage.setItem('dsa_chat_session_id', 'context-session');
+    vi.mocked(agentApi.getChatSessions).mockResolvedValue([
+      {
+        session_id: 'context-session',
+        title: '追问 贵州茅台(600519)',
+        message_count: 0,
+        created_at: '2026-03-18T08:00:00Z',
+        last_active: '2026-03-18T08:05:00Z',
+      },
+    ]);
+    vi.mocked(agentApi.getChatSessionDetail).mockResolvedValue({
+      session_id: 'context-session',
+      messages: [],
+      context: {
+        sourceType: 'analysis_report',
+        sourceRecordId: 1,
+        stockCode: '600519',
+        stockName: '贵州茅台',
+        previousPrice: 1523.6,
+      },
+    });
+    useAgentChatStore.setState({
+      hasInitialLoad: false,
+      sessionId: 'context-session',
+    });
+
+    await useAgentChatStore.getState().loadInitialSession();
+
+    expect(useAgentChatStore.getState().messages).toEqual([]);
+    expect(useAgentChatStore.getState().currentContext).toMatchObject({
+      sourceRecordId: 1,
+      stockCode: '600519',
+    });
+  });
+
+  it('does not replace a follow-up session created while initial sessions are loading', async () => {
+    localStorage.setItem('dsa_chat_session_id', 'old-session');
+    const sessionsDeferred = createDeferred<Awaited<ReturnType<typeof agentApi.getChatSessions>>>();
+    vi.mocked(agentApi.getChatSessions).mockReturnValueOnce(sessionsDeferred.promise);
+    useAgentChatStore.setState({
+      hasInitialLoad: false,
+      sessionId: 'old-session',
+      sessions: [],
+      messages: [],
+      currentContext: null,
+    });
+
+    const loadPromise = useAgentChatStore.getState().loadInitialSession();
+    useAgentChatStore.getState().startNewChat('follow-up-session');
+
+    sessionsDeferred.resolve([
+      {
+        session_id: 'old-session',
+        title: '旧会话',
+        message_count: 1,
+        created_at: '2026-03-18T08:00:00Z',
+        last_active: '2026-03-18T08:05:00Z',
+      },
+    ]);
+    await loadPromise;
+
+    expect(useAgentChatStore.getState().sessionId).toBe('follow-up-session');
+    expect(localStorage.getItem('dsa_chat_session_id')).toBe('follow-up-session');
+    expect(agentApi.getChatSessionDetail).not.toHaveBeenCalled();
+  });
+
+  it('clears context when starting a new chat', () => {
+    useAgentChatStore.setState({
+      currentContext: {
+        sourceType: 'analysis_report',
+        sourceRecordId: 1,
+        stockCode: '600519',
+        stockName: '贵州茅台',
+      },
+    });
+
+    useAgentChatStore.getState().startNewChat('new-session');
+
+    expect(useAgentChatStore.getState().sessionId).toBe('new-session');
+    expect(useAgentChatStore.getState().currentContext).toBeNull();
+  });
+
+  it('removes persisted context for the current session', async () => {
+    useAgentChatStore.setState({
+      sessionId: 'context-session',
+      currentContext: {
+        sourceType: 'analysis_report',
+        sourceRecordId: 1,
+        stockCode: '600519',
+        stockName: '贵州茅台',
+      },
+    });
+
+    await useAgentChatStore.getState().removeContext();
+
+    expect(agentApi.deleteChatSessionContext).toHaveBeenCalledWith('context-session');
+    expect(useAgentChatStore.getState().currentContext).toBeNull();
+  });
+
+  it('does not restore context from an outdated save after removal', async () => {
+    const context = {
+      sourceType: 'analysis_report' as const,
+      sourceRecordId: 1,
+      stockCode: '600519',
+      stockName: '贵州茅台',
+    };
+    const deferred = createDeferred<typeof context>();
+    vi.mocked(agentApi.saveChatSessionContext).mockReturnValueOnce(deferred.promise);
+    useAgentChatStore.setState({
+      sessionId: 'context-session',
+      currentContext: null,
+      contextLoading: false,
+    });
+
+    const savePromise = useAgentChatStore.getState().saveContext(context);
+    await useAgentChatStore.getState().removeContext();
+    deferred.resolve(context);
+    await savePromise;
+
+    expect(useAgentChatStore.getState().currentContext).toBeNull();
+    expect(useAgentChatStore.getState().contextLoading).toBe(false);
   });
 });
