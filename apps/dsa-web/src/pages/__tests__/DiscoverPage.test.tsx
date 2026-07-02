@@ -104,6 +104,24 @@ const index: StockIndexItem[] = [
   },
 ];
 
+const createDiscoverStock = (idx: number): StockIndexItem => {
+  const code = String(100000 + idx).padStart(6, '0');
+  return {
+    canonicalCode: `${code}.SZ`,
+    displayCode: code,
+    nameZh: `测试股票${idx}`,
+    pinyinFull: `ceshigupiao${idx}`,
+    pinyinAbbr: `csgp${idx}`,
+    aliases: [],
+    market: 'CN',
+    assetType: 'stock',
+    active: true,
+    popularity: 1,
+    industry: '测试行业',
+    industrySource: 'override',
+  };
+};
+
 describe('DiscoverPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -150,6 +168,19 @@ describe('DiscoverPage', () => {
     });
   });
 
+  it('renders discovery filters and metrics in a compact toolbar', () => {
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId('discover-compact-toolbar')).toBeInTheDocument();
+    expect(screen.getByTestId('discover-compact-metrics')).toHaveTextContent('当前市场');
+    expect(screen.getByTestId('discover-compact-metrics')).toHaveTextContent('当前结果');
+    expect(screen.getByTestId('discover-compact-metrics')).toHaveTextContent('行业覆盖率');
+  });
+
   it('submits analysis with discover selection source and shows duplicate task feedback', async () => {
     vi.mocked(analysisApi.analyzeAsync).mockRejectedValueOnce(
       new DuplicateTaskError('600519.SH', 'task-1', '股票 600519.SH 正在分析中'),
@@ -172,5 +203,39 @@ describe('DiscoverPage', () => {
       }));
     });
     expect(await screen.findByText('分析已在进行')).toBeInTheDocument();
+  });
+
+  it('paginates the discoverable stock list with compact page sizes', async () => {
+    const largeIndex = Array.from({ length: 125 }, (_, idx) => createDiscoverStock(idx + 1));
+    vi.mocked(useStockIndex).mockReturnValue({
+      index: largeIndex,
+      loading: false,
+      error: null,
+      fallback: false,
+      loaded: true,
+    });
+
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('显示 1-50 / 125')).toBeInTheDocument();
+    expect(screen.getByText('测试股票1')).toBeInTheDocument();
+    expect(screen.queryByText('测试股票51')).not.toBeInTheDocument();
+    expect(screen.getByTestId('discover-stock-table-scroll')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
+
+    expect(screen.getByText('显示 51-100 / 125')).toBeInTheDocument();
+    expect(screen.queryByText('测试股票1')).not.toBeInTheDocument();
+    expect(screen.getByText('测试股票51')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('每页'), { target: { value: '100' } });
+
+    expect(screen.getByText('显示 1-100 / 125')).toBeInTheDocument();
+    expect(screen.getByText('测试股票1')).toBeInTheDocument();
+    expect(screen.queryByText('测试股票101')).not.toBeInTheDocument();
   });
 });

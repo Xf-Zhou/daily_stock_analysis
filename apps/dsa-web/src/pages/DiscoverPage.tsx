@@ -19,13 +19,15 @@ import {
   type RankingStatus,
   type StockRankingItem,
 } from '../api/stocks';
-import { AppPage, Badge, Button, EmptyState, InlineAlert, Input, PageHeader, Select } from '../components/common';
+import { AppPage, Badge, Button, EmptyState, InlineAlert, Input, Pagination, Select } from '../components/common';
 import { useStockIndex } from '../hooks/useStockIndex';
 import type { Market } from '../types/stockIndex';
 import { searchStocks } from '../utils/searchStocks';
 import { cn } from '../utils/cn';
 
 const UNCATEGORIZED_INDUSTRY = '__uncategorized__';
+const STOCK_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
+const DEFAULT_STOCK_PAGE_SIZE = 50;
 type DiscoverMarket = Extract<Market, 'CN' | 'BSE' | 'HK' | 'US'>;
 
 const MARKET_OPTIONS: Array<{ value: DiscoverMarket; label: string }> = [
@@ -104,6 +106,8 @@ const DiscoverPage: React.FC = () => {
   const [rankingError, setRankingError] = useState<string | null>(null);
   const [analyzingCode, setAnalyzingCode] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<ActionNotice>(null);
+  const [stockPage, setStockPage] = useState(1);
+  const [stockPageSize, setStockPageSize] = useState(DEFAULT_STOCK_PAGE_SIZE);
 
   const activeRanking = RANKING_TABS.find((tab) => tab.key === rankingKey) ?? RANKING_TABS[0];
 
@@ -155,6 +159,10 @@ const DiscoverPage: React.FC = () => {
     }
     return keywordFilteredStocks;
   }, [industry, keywordFilteredStocks]);
+
+  useEffect(() => {
+    setStockPage(1);
+  }, [industry, keyword, market]);
 
   const coverage = useMemo(() => {
     const denominator = keywordFilteredStocks.length;
@@ -239,53 +247,66 @@ const DiscoverPage: React.FC = () => {
     navigate(`/chat?stock=${encodeURIComponent(stockCode)}&name=${encodeURIComponent(stockName)}`);
   }, [navigate]);
 
-  const visibleStocks = filteredStocks.slice(0, 120);
+  const handleStockPageSizeChange = useCallback((value: string) => {
+    const parsed = Number(value);
+    const nextSize = STOCK_PAGE_SIZE_OPTIONS.find((option) => option === parsed) ?? DEFAULT_STOCK_PAGE_SIZE;
+    setStockPageSize(nextSize);
+    setStockPage(1);
+  }, []);
+
+  const totalStockPages = Math.max(1, Math.ceil(filteredStocks.length / stockPageSize));
+  const clampedStockPage = Math.min(stockPage, totalStockPages);
+  const pageStartIndex = (clampedStockPage - 1) * stockPageSize;
+  const visibleStocks = filteredStocks.slice(pageStartIndex, pageStartIndex + stockPageSize);
+  const visibleStart = filteredStocks.length > 0 ? pageStartIndex + 1 : 0;
+  const visibleEnd = pageStartIndex + visibleStocks.length;
   const statusMeta = STATUS_META[rankingStatus];
 
   return (
-    <AppPage className="space-y-5">
-      <PageHeader
-        eyebrow="DISCOVER"
-        title="股票发现"
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="info">{MARKET_OPTIONS.find((option) => option.value === market)?.label}</Badge>
-            <Badge variant={coverage.percent >= 60 ? 'success' : coverage.percent > 0 ? 'warning' : 'default'}>
-              行业覆盖 {coverage.numerator}/{coverage.denominator}
-            </Badge>
+    <AppPage className="space-y-4">
+      <section data-testid="discover-compact-toolbar" className="glass-panel-lg px-4 py-3">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="label-uppercase text-[10px]">DISCOVER</span>
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">股票发现</h1>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="info">{MARKET_OPTIONS.find((option) => option.value === market)?.label}</Badge>
+              <Badge variant={coverage.percent >= 60 ? 'success' : coverage.percent > 0 ? 'warning' : 'default'}>
+                行业覆盖 {coverage.numerator}/{coverage.denominator}
+              </Badge>
+            </div>
           </div>
-        }
-      />
 
-      <section className="glass-panel-lg px-4 py-4">
-        <div className="grid gap-3 md:grid-cols-[180px_minmax(220px,1fr)_220px]">
-          <Select
-            label="市场"
-            value={market}
-            onChange={(value) => setMarket(value as DiscoverMarket)}
-            options={MARKET_OPTIONS}
-          />
-          <Input
-            label="关键词"
-            type="search"
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder="代码、名称、拼音、别名"
-            trailingAction={<Search className="h-4 w-4 text-muted-text" />}
-          />
-          <Select
-            label="行业"
-            value={industry}
-            onChange={setIndustry}
-            options={industryOptions}
-            disabled={loading || industryOptions.length <= 1}
-          />
-        </div>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <MetricBlock label="当前市场" value={formatNumber(marketStocks.length)} />
-          <MetricBlock label="当前结果" value={formatNumber(filteredStocks.length)} />
-          <MetricBlock label="行业覆盖率" value={`${coverage.percent}%`} />
+          <div className="grid gap-3 md:grid-cols-[160px_minmax(220px,1fr)_220px] xl:grid-cols-[160px_minmax(260px,1fr)_220px_minmax(360px,0.7fr)] xl:items-end">
+            <Select
+              label="市场"
+              value={market}
+              onChange={(value) => setMarket(value as DiscoverMarket)}
+              options={MARKET_OPTIONS}
+            />
+            <Input
+              label="关键词"
+              type="search"
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              placeholder="代码、名称、拼音、别名"
+              trailingAction={<Search className="h-4 w-4 text-muted-text" />}
+            />
+            <Select
+              label="行业"
+              value={industry}
+              onChange={setIndustry}
+              options={industryOptions}
+              disabled={loading || industryOptions.length <= 1}
+            />
+            <div data-testid="discover-compact-metrics" className="grid grid-cols-3 gap-2 md:col-span-3 xl:col-span-1">
+              <CompactMetric label="当前市场" value={formatNumber(marketStocks.length)} />
+              <CompactMetric label="当前结果" value={formatNumber(filteredStocks.length)} />
+              <CompactMetric label="行业覆盖率" value={`${coverage.percent}%`} />
+            </div>
+          </div>
         </div>
       </section>
 
@@ -367,11 +388,23 @@ const DiscoverPage: React.FC = () => {
       </section>
 
       <section className="glass-panel-lg px-4 py-4">
-        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-base font-semibold text-foreground">可关注股票</h2>
-          <span className="text-xs text-secondary-text">
-            {visibleStocks.length < filteredStocks.length ? `显示 ${visibleStocks.length} / ${filteredStocks.length}` : `${filteredStocks.length} 只`}
-          </span>
+        <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">可关注股票</h2>
+            <span className="mt-1 block text-xs text-secondary-text">
+              {filteredStocks.length > 0
+                ? `显示 ${visibleStart}-${visibleEnd} / ${filteredStocks.length}`
+                : '0 只'}
+            </span>
+          </div>
+          <Select
+            label="每页"
+            value={String(stockPageSize)}
+            onChange={handleStockPageSizeChange}
+            options={STOCK_PAGE_SIZE_OPTIONS.map((size) => ({ value: String(size), label: `${size} 条` }))}
+            className="w-full sm:w-32"
+            disabled={loading || filteredStocks.length === 0}
+          />
         </div>
 
         {loading ? (
@@ -381,59 +414,71 @@ const DiscoverPage: React.FC = () => {
             ))}
           </div>
         ) : visibleStocks.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-[760px] w-full text-left text-sm">
-              <thead className="border-b border-border/60 text-xs uppercase text-muted-text">
-                <tr>
-                  <th className="px-3 py-2 font-medium">代码</th>
-                  <th className="px-3 py-2 font-medium">名称</th>
-                  <th className="px-3 py-2 font-medium">市场</th>
-                  <th className="px-3 py-2 font-medium">行业</th>
-                  <th className="px-3 py-2 text-right font-medium">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/45">
-                {visibleStocks.map((item) => (
-                  <tr key={item.canonicalCode} className="transition-colors hover:bg-hover/60">
-                    <td className="px-3 py-3 font-mono text-sm text-foreground">{item.displayCode}</td>
-                    <td className="px-3 py-3">
-                      <div className="font-medium text-foreground">{item.nameZh}</div>
-                      <div className="text-xs text-muted-text">{item.canonicalCode}</div>
-                    </td>
-                    <td className="px-3 py-3 text-secondary-text">
-                      {MARKET_OPTIONS.find((option) => option.value === item.market)?.label ?? item.market}
-                    </td>
-                    <td className="px-3 py-3">
-                      <Badge variant={item.industry ? 'info' : 'default'}>
-                        {item.industry || '未分类'}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => void handleAnalyze(item.canonicalCode, item.nameZh)}
-                          isLoading={analyzingCode === item.canonicalCode}
-                          loadingText="分析中"
-                        >
-                          <Play className="h-4 w-4" />
-                          分析
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleAsk(item.canonicalCode, item.nameZh)}
-                        >
-                          <MessageSquareQuote className="h-4 w-4" />
-                          问股
-                        </Button>
-                      </div>
-                    </td>
+          <div className="overflow-hidden rounded-xl border border-border/45 bg-base/20">
+            <div data-testid="discover-stock-table-scroll" className="max-h-[520px] overflow-auto">
+              <table className="min-w-[760px] w-full text-left text-sm">
+                <thead className="sticky top-0 z-10 border-b border-border/60 bg-card/95 text-xs uppercase text-muted-text backdrop-blur">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">代码</th>
+                    <th className="px-3 py-2 font-medium">名称</th>
+                    <th className="px-3 py-2 font-medium">市场</th>
+                    <th className="px-3 py-2 font-medium">行业</th>
+                    <th className="px-3 py-2 text-right font-medium">操作</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-border/45">
+                  {visibleStocks.map((item) => (
+                    <tr key={item.canonicalCode} className="transition-colors hover:bg-hover/60">
+                      <td className="px-3 py-3 font-mono text-sm text-foreground">{item.displayCode}</td>
+                      <td className="px-3 py-3">
+                        <div className="font-medium text-foreground">{item.nameZh}</div>
+                        <div className="text-xs text-muted-text">{item.canonicalCode}</div>
+                      </td>
+                      <td className="px-3 py-3 text-secondary-text">
+                        {MARKET_OPTIONS.find((option) => option.value === item.market)?.label ?? item.market}
+                      </td>
+                      <td className="px-3 py-3">
+                        <Badge variant={item.industry ? 'info' : 'default'}>
+                          {item.industry || '未分类'}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => void handleAnalyze(item.canonicalCode, item.nameZh)}
+                            isLoading={analyzingCode === item.canonicalCode}
+                            loadingText="分析中"
+                          >
+                            <Play className="h-4 w-4" />
+                            分析
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleAsk(item.canonicalCode, item.nameZh)}
+                          >
+                            <MessageSquareQuote className="h-4 w-4" />
+                            问股
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {totalStockPages > 1 ? (
+              <div className="border-t border-border/45 bg-card/80 px-3 py-3">
+                <Pagination
+                  currentPage={clampedStockPage}
+                  totalPages={totalStockPages}
+                  onPageChange={setStockPage}
+                  className="justify-end"
+                />
+              </div>
+            ) : null}
           </div>
         ) : (
           <EmptyState title="没有匹配股票" description="" icon={<Search className="h-6 w-6" />} />
@@ -443,15 +488,15 @@ const DiscoverPage: React.FC = () => {
   );
 };
 
-type MetricBlockProps = {
+type CompactMetricProps = {
   label: string;
   value: string;
 };
 
-const MetricBlock: React.FC<MetricBlockProps> = ({ label, value }) => (
-  <div className="rounded-lg border border-border/55 bg-elevated/35 px-4 py-3">
-    <div className="text-xs text-muted-text">{label}</div>
-    <div className="mt-1 text-lg font-semibold text-foreground">{value}</div>
+const CompactMetric: React.FC<CompactMetricProps> = ({ label, value }) => (
+  <div className="min-w-0 rounded-lg border border-border/55 bg-elevated/30 px-3 py-2">
+    <div className="truncate text-[11px] leading-4 text-muted-text">{label}</div>
+    <div className="truncate text-sm font-semibold leading-5 text-foreground">{value}</div>
   </div>
 );
 
