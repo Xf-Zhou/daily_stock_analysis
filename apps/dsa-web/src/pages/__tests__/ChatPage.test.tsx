@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -912,6 +912,90 @@ describe('ChatPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '移除上下文' }));
     expect(mockRemoveContext).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders persisted report context in the message stream before the related user message', async () => {
+    mockStoreState.currentContext = {
+      sourceType: 'analysis_report',
+      sourceRecordId: 1,
+      stockCode: '000001.SZ',
+      stockName: '平安银行',
+      previousPrice: 10.28,
+      previousChangePct: 1.18,
+      previousAnalysisSummary: { operationAdvice: '观望' },
+      previousStrategy: { stopLoss: '9.98' },
+    };
+    mockStoreState.messages = [
+      { id: 'user-ctx-1', role: 'user', content: '你能看到我给你提供了什么上下文吗' },
+      { id: 'assistant-ctx-1', role: 'assistant', content: '可以，我能看到历史报告上下文。' },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    const scrollArea = await screen.findByTestId('chat-message-scroll');
+    const contextCard = within(scrollArea).getByTestId('chat-session-context-card');
+    const userMessage = within(scrollArea).getByText('你能看到我给你提供了什么上下文吗');
+
+    expect(contextCard.compareDocumentPosition(userMessage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getAllByTestId('chat-session-context-card')).toHaveLength(1);
+  });
+
+  it('expands persisted report context details inside the message stream', async () => {
+    mockStoreState.currentContext = {
+      sourceType: 'analysis_report',
+      sourceRecordId: 1,
+      stockCode: '000001.SZ',
+      stockName: '平安银行',
+      previousPrice: 10.28,
+      previousChangePct: 1.18,
+      previousAnalysisSummary: {
+        analysisSummary: '弱势探底后技术性反弹',
+        operationAdvice: '观望',
+        trendPrediction: '短线震荡',
+        sentimentScore: 45,
+      },
+      previousStrategy: {
+        idealBuy: '9.80',
+        secondaryBuy: '10.19',
+        stopLoss: '9.98',
+        takeProfit: '10.61',
+      },
+    };
+    mockStoreState.messages = [
+      { id: 'user-ctx-1', role: 'user', content: '你能看到我给你提供了什么上下文吗' },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('基于历史报告 #1 追问')).toBeInTheDocument();
+    expect(screen.queryByText('弱势探底后技术性反弹')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }));
+
+    expect(screen.getByText('报告摘要')).toBeInTheDocument();
+    expect(screen.getByText('弱势探底后技术性反弹')).toBeInTheDocument();
+    expect(screen.getByText('操作建议')).toBeInTheDocument();
+    expect(screen.getAllByText('观望').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('趋势预测')).toBeInTheDocument();
+    expect(screen.getByText('短线震荡')).toBeInTheDocument();
+    expect(screen.getByText('情绪评分')).toBeInTheDocument();
+    expect(screen.getByText('45')).toBeInTheDocument();
+    expect(screen.getByText('理想买入')).toBeInTheDocument();
+    expect(screen.getByText('9.80')).toBeInTheDocument();
+    expect(screen.getByText('止损位')).toBeInTheDocument();
+    expect(screen.getAllByText('9.98').length).toBeGreaterThanOrEqual(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '收起详情' }));
+
+    expect(screen.queryByText('弱势探底后技术性反弹')).not.toBeInTheDocument();
   });
 
   it('shows a jump-to-latest action when new content arrives while the user is away from bottom', async () => {

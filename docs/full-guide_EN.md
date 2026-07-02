@@ -1012,7 +1012,7 @@ FastAPI provides RESTful API service for configuration management and triggering
 - **Real-time Progress** - Analysis task status updates in real-time, supports parallel tasks; the regular stock-analysis path now prefers LiteLLM streaming during the LLM stage and pushes finer-grained `message/progress` updates through task SSE
 - **Market Review visibility** - After clicking Market Review, the API returns a `task_id` and the UI polls `GET /api/v1/analysis/status/{task_id}` to show progress; completed/failure states are rendered explicitly and failure messages are shown directly in the UI error area.
 - **Stock Discovery** - The Web UI can filter stocks by market, industry, and keyword, then jump into analysis or chat from quote rankings
-- **Historical report follow-up context** - Clicking "Ask AI" from a historical report creates a new chat session, saves a visible report-source card, restores it after refresh/service restart/session switch, and keeps injecting it into later Agent follow-ups
+- **Historical report follow-up context** - Clicking "Ask AI" from a historical report creates a new chat session, shows an expandable report-source card inside the message stream, restores it after refresh/service restart/session switch, and keeps injecting it into later Agent follow-ups
 - **Backtest Validation** - Evaluate historical analysis accuracy, query direction win rate and simulated returns
 - **API Documentation** - Visit `/docs` for Swagger UI
 

@@ -72,6 +72,71 @@ const stringifyContextField = (value: unknown): string | null => {
   }
 };
 
+const CONTEXT_SUMMARY_LABELS: Record<string, string> = {
+  analysisSummary: '报告摘要',
+  operationAdvice: '操作建议',
+  trendPrediction: '趋势预测',
+  sentimentScore: '情绪评分',
+  sentimentLabel: '情绪标签',
+};
+
+const CONTEXT_STRATEGY_LABELS: Record<string, string> = {
+  idealBuy: '理想买入',
+  secondaryBuy: '次优买入',
+  stopLoss: '止损位',
+  takeProfit: '目标止盈',
+};
+
+type ContextDetailRow = {
+  label: string;
+  value: string;
+};
+
+const isContextRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const formatContextDetailValue = (value: unknown): string | null => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') return value.trim() || null;
+  if (typeof value === 'number') return Number.isNaN(value) ? null : String(value);
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const buildContextDetailRows = (
+  value: unknown,
+  labels: Record<string, string>,
+  fallbackLabel: string,
+): ContextDetailRow[] => {
+  if (!isContextRecord(value)) {
+    const formatted = formatContextDetailValue(value);
+    return formatted ? [{ label: fallbackLabel, value: formatted }] : [];
+  }
+
+  const rows: ContextDetailRow[] = [];
+  const knownKeys = Object.keys(labels);
+  for (const key of knownKeys) {
+    const formatted = formatContextDetailValue(value[key]);
+    if (formatted) {
+      rows.push({ label: labels[key], value: formatted });
+    }
+  }
+
+  for (const [key, rawValue] of Object.entries(value)) {
+    if (knownKeys.includes(key)) continue;
+    const formatted = formatContextDetailValue(rawValue);
+    if (formatted) {
+      rows.push({ label: key, value: formatted });
+    }
+  }
+
+  return rows;
+};
+
 const ChatPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [input, setInput] = useState('');
@@ -79,6 +144,7 @@ const ChatPage: React.FC = () => {
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [showSkillDesc, setShowSkillDesc] = useState<string | null>(null);
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
+  const [contextDetailsExpanded, setContextDetailsExpanded] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sending, setSending] = useState(false);
@@ -367,6 +433,113 @@ const ChatPage: React.FC = () => {
   const contextChangePct = formatContextNumber(currentContext?.previousChangePct);
   const contextSummary = stringifyContextField(currentContext?.previousAnalysisSummary);
   const contextStrategy = stringifyContextField(currentContext?.previousStrategy);
+  const summaryDetailRows = buildContextDetailRows(
+    currentContext?.previousAnalysisSummary,
+    CONTEXT_SUMMARY_LABELS,
+    '上次结论',
+  );
+  const strategyDetailRows = buildContextDetailRows(
+    currentContext?.previousStrategy,
+    CONTEXT_STRATEGY_LABELS,
+    '策略点位',
+  );
+  const hasContextDetails = summaryDetailRows.length > 0 || strategyDetailRows.length > 0;
+  const contextCard = currentContext ? (
+    <div className="flex flex-row-reverse gap-4">
+      <div className="h-8 w-8 flex-shrink-0" aria-hidden="true" />
+      <div
+        className="w-full max-w-[min(100%,48rem)] rounded-xl border border-cyan/25 bg-cyan/5 px-3.5 py-3 text-sm shadow-none"
+        data-testid="chat-session-context-card"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-foreground">
+                基于历史报告 #{currentContext.sourceRecordId} 追问
+              </span>
+              <Badge variant="info" className="shadow-none">
+                {currentContext.sourceType === 'analysis_report' ? '历史报告' : currentContext.sourceType}
+              </Badge>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-secondary-text">
+              <span className="font-medium text-foreground">
+                {currentContext.stockName
+                  ? `${currentContext.stockName}(${currentContext.stockCode})`
+                  : currentContext.stockCode}
+              </span>
+              {contextPrice !== null ? <span>上次价格 {contextPrice}</span> : null}
+              {contextChangePct !== null ? <span>涨跌幅 {contextChangePct}%</span> : null}
+            </div>
+            {(contextSummary || contextStrategy) ? (
+              <div className="grid gap-1 text-xs text-secondary-text sm:grid-cols-2">
+                {contextSummary ? (
+                  <p className="min-w-0 truncate">
+                    <span className="text-muted-text">上次结论：</span>
+                    {contextSummary}
+                  </p>
+                ) : null}
+                {contextStrategy ? (
+                  <p className="min-w-0 truncate">
+                    <span className="text-muted-text">策略点位：</span>
+                    {contextStrategy}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
+            {hasContextDetails ? (
+              <button
+                type="button"
+                className="chat-copy-btn"
+                onClick={() => setContextDetailsExpanded((expanded) => !expanded)}
+                aria-expanded={contextDetailsExpanded}
+              >
+                {contextDetailsExpanded ? '收起详情' : '展开详情'}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="chat-copy-btn"
+              onClick={handleRemoveContext}
+            >
+              移除上下文
+            </button>
+          </div>
+        </div>
+        {contextDetailsExpanded && hasContextDetails ? (
+          <div className="mt-3 grid gap-3 border-t border-cyan/15 pt-3 text-xs text-secondary-text sm:grid-cols-2">
+            {summaryDetailRows.length > 0 ? (
+              <div className="space-y-2">
+                <div className="font-semibold text-foreground">上次分析</div>
+                <dl className="space-y-1.5">
+                  {summaryDetailRows.map((row) => (
+                    <div key={`summary-${row.label}`} className="grid grid-cols-[4.5rem_1fr] gap-2">
+                      <dt className="text-muted-text">{row.label}</dt>
+                      <dd className="min-w-0 whitespace-pre-wrap break-words text-secondary-text">{row.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            ) : null}
+            {strategyDetailRows.length > 0 ? (
+              <div className="space-y-2">
+                <div className="font-semibold text-foreground">策略点位</div>
+                <dl className="space-y-1.5">
+                  {strategyDetailRows.map((row) => (
+                    <div key={`strategy-${row.label}`} className="grid grid-cols-[4.5rem_1fr] gap-2">
+                      <dt className="text-muted-text">{row.label}</dt>
+                      <dd className="min-w-0 whitespace-pre-wrap break-words text-secondary-text">{row.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  ) : null;
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -819,7 +992,7 @@ const ChatPage: React.FC = () => {
             viewportClassName="space-y-6 p-4 md:p-6"
             testId="chat-message-scroll"
           >
-            {messages.length === 0 && !loading ? (
+            {messages.length === 0 && !loading && !currentContext ? (
               <div className="flex h-full items-center justify-center">
                 <EmptyState
                   title="开始问股"
@@ -856,94 +1029,97 @@ const ChatPage: React.FC = () => {
                 />
               </div>
             ) : (
-              messages.map((msg) => {
-                const skillLabel = getMessageSkillLabel(msg);
-                return (
-                <div
-                  key={msg.id}
-                  className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
-                >
+              <>
+                {contextCard}
+                {messages.map((msg) => {
+                  const skillLabel = getMessageSkillLabel(msg);
+                  return (
                   <div
-                    className={cn(
-                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold shadow-sm transition-all',
-                      msg.role === 'user' ? 'chat-avatar-user' : 'chat-avatar-ai'
-                    )}
+                    key={msg.id}
+                    className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
                   >
-                    {msg.role === 'user' ? 'U' : 'AI'}
-                  </div>
-                  <div
-                    className={cn(
-                      'group/message min-w-0 w-fit max-w-[min(100%,48rem)] overflow-hidden px-5 py-3.5 transition-colors',
-                      msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'
-                    )}
-                  >
-                    {msg.role === 'assistant' && skillLabel && (
-                      <div className="mb-2">
-                        <Badge variant="info" className="chat-skill-badge shadow-none" aria-label={`技能 ${skillLabel}`}>
-                          <svg
-                            className="w-3 h-3"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M13 10V3L4 14h7v7l9-11h-7z"
-                            />
-                          </svg>
-                          {skillLabel}
-                        </Badge>
-                      </div>
-                    )}
-                    {msg.role === 'assistant' && renderThinkingBlock(msg)}
-                    {msg.role === 'assistant' &&
-                      expandedThinking.has(msg.id) &&
-                      msg.thinkingSteps &&
-                      renderThinkingDetails(msg.thinkingSteps)}
-                    {msg.role === 'assistant' ? (
-                      <div className="relative">
-                        <div className="chat-message-actions">
-                          <button
-                            type="button"
-                            onClick={() => copyMessageToClipboard(msg.id, msg.content)}
-                            className="chat-copy-btn"
-                            aria-label={copiedMessages.has(msg.id) ? text.copied : text.copy}
-                          >
-                            {copiedMessages.has(msg.id) ? text.copied : text.copy}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => downloadMessageAsMarkdown(msg)}
-                            className="chat-copy-btn"
-                            aria-label="导出此条消息为 Markdown"
-                          >
-                            导出
-                          </button>
+                    <div
+                      className={cn(
+                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold shadow-sm transition-all',
+                        msg.role === 'user' ? 'chat-avatar-user' : 'chat-avatar-ai'
+                      )}
+                    >
+                      {msg.role === 'user' ? 'U' : 'AI'}
+                    </div>
+                    <div
+                      className={cn(
+                        'group/message min-w-0 w-fit max-w-[min(100%,48rem)] overflow-hidden px-5 py-3.5 transition-colors',
+                        msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'
+                      )}
+                    >
+                      {msg.role === 'assistant' && skillLabel && (
+                        <div className="mb-2">
+                          <Badge variant="info" className="chat-skill-badge shadow-none" aria-label={`技能 ${skillLabel}`}>
+                            <svg
+                              className="w-3 h-3"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M13 10V3L4 14h7v7l9-11h-7z"
+                              />
+                            </svg>
+                            {skillLabel}
+                          </Badge>
                         </div>
-                        <div className="chat-prose pr-20 sm:pr-24">
-                          <Markdown remarkPlugins={[remarkGfm]}>
-                            {msg.content}
-                          </Markdown>
+                      )}
+                      {msg.role === 'assistant' && renderThinkingBlock(msg)}
+                      {msg.role === 'assistant' &&
+                        expandedThinking.has(msg.id) &&
+                        msg.thinkingSteps &&
+                        renderThinkingDetails(msg.thinkingSteps)}
+                      {msg.role === 'assistant' ? (
+                        <div className="relative">
+                          <div className="chat-message-actions">
+                            <button
+                              type="button"
+                              onClick={() => copyMessageToClipboard(msg.id, msg.content)}
+                              className="chat-copy-btn"
+                              aria-label={copiedMessages.has(msg.id) ? text.copied : text.copy}
+                            >
+                              {copiedMessages.has(msg.id) ? text.copied : text.copy}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => downloadMessageAsMarkdown(msg)}
+                              className="chat-copy-btn"
+                              aria-label="导出此条消息为 Markdown"
+                            >
+                              导出
+                            </button>
+                          </div>
+                          <div className="chat-prose pr-20 sm:pr-24">
+                            <Markdown remarkPlugins={[remarkGfm]}>
+                              {msg.content}
+                            </Markdown>
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      msg.content
-                        .split('\n')
-                        .map((line, i) => (
-                          <p
-                            key={i}
-                            className="mb-1 last:mb-0 leading-relaxed"
-                          >
-                            {line || '\u00A0'}
-                          </p>
-                        ))
-                    )}
+                      ) : (
+                        msg.content
+                          .split('\n')
+                          .map((line, i) => (
+                            <p
+                              key={i}
+                              className="mb-1 last:mb-0 leading-relaxed"
+                            >
+                              {line || '\u00A0'}
+                            </p>
+                          ))
+                      )}
+                    </div>
                   </div>
-                </div>
-                );
-              })
+                  );
+                })}
+              </>
             )}
 
             {loading && (
@@ -1008,57 +1184,6 @@ const ChatPage: React.FC = () => {
                   message="正在加载历史分析报告上下文；加载完成后会带着原报告追问。"
                   className="rounded-xl px-3 py-2 text-xs shadow-none"
                 />
-              ) : null}
-              {currentContext ? (
-                <div
-                  className="rounded-xl border border-cyan/25 bg-cyan/5 px-3.5 py-3 text-sm shadow-none"
-                  data-testid="chat-session-context-card"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-1.5">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold text-foreground">
-                          基于历史报告 #{currentContext.sourceRecordId} 追问
-                        </span>
-                        <Badge variant="info" className="shadow-none">
-                          {currentContext.sourceType === 'analysis_report' ? '历史报告' : currentContext.sourceType}
-                        </Badge>
-                      </div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-secondary-text">
-                        <span className="font-medium text-foreground">
-                          {currentContext.stockName
-                            ? `${currentContext.stockName}(${currentContext.stockCode})`
-                            : currentContext.stockCode}
-                        </span>
-                        {contextPrice !== null ? <span>上次价格 {contextPrice}</span> : null}
-                        {contextChangePct !== null ? <span>涨跌幅 {contextChangePct}%</span> : null}
-                      </div>
-                      {(contextSummary || contextStrategy) ? (
-                        <div className="grid gap-1 text-xs text-secondary-text sm:grid-cols-2">
-                          {contextSummary ? (
-                            <p className="min-w-0 truncate">
-                              <span className="text-muted-text">上次结论：</span>
-                              {contextSummary}
-                            </p>
-                          ) : null}
-                          {contextStrategy ? (
-                            <p className="min-w-0 truncate">
-                              <span className="text-muted-text">策略点位：</span>
-                              {contextStrategy}
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                    <button
-                      type="button"
-                      className="chat-copy-btn flex-shrink-0"
-                      onClick={handleRemoveContext}
-                    >
-                      移除上下文
-                    </button>
-                  </div>
-                </div>
               ) : null}
             {skills.length > 0 && (
               <div className="flex flex-wrap items-start gap-x-5 gap-y-2">
