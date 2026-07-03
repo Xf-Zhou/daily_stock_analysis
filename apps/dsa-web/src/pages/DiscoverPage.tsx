@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   BarChart3,
+  ChartCandlestick,
   LineChart,
   MessageSquareQuote,
   Play,
@@ -19,7 +20,8 @@ import {
   type RankingStatus,
   type StockRankingItem,
 } from '../api/stocks';
-import { AppPage, Badge, Button, EmptyState, InlineAlert, Input, Pagination, Select } from '../components/common';
+import { AppPage, Badge, Button, EmptyState, InlineAlert, Input, Pagination, Select, Tooltip } from '../components/common';
+import { StockKLineDrawer } from '../components/stocks/StockKLineDrawer';
 import { useStockIndex } from '../hooks/useStockIndex';
 import type { Market } from '../types/stockIndex';
 import { searchStocks } from '../utils/searchStocks';
@@ -110,6 +112,7 @@ const DiscoverPage: React.FC = () => {
   const [actionNotice, setActionNotice] = useState<ActionNotice>(null);
   const [stockPage, setStockPage] = useState(1);
   const [stockPageSize, setStockPageSize] = useState(DEFAULT_STOCK_PAGE_SIZE);
+  const [kLineStock, setKLineStock] = useState<{ code: string; name: string } | null>(null);
 
   const activeRanking = RANKING_TABS.find((tab) => tab.key === rankingKey) ?? RANKING_TABS[0];
 
@@ -252,6 +255,10 @@ const DiscoverPage: React.FC = () => {
     navigate(`/chat?stock=${encodeURIComponent(stockCode)}&name=${encodeURIComponent(stockName)}`);
   }, [navigate]);
 
+  const handleOpenKLine = useCallback((stockCode: string, stockName: string) => {
+    setKLineStock({ code: stockCode, name: stockName });
+  }, []);
+
   const handleStockPageSizeChange = useCallback((value: string) => {
     const parsed = Number(value);
     const nextSize = STOCK_PAGE_SIZE_OPTIONS.find((option) => option === parsed) ?? DEFAULT_STOCK_PAGE_SIZE;
@@ -385,6 +392,7 @@ const DiscoverPage: React.FC = () => {
                 rank={index + 1}
                 onAnalyze={handleAnalyze}
                 onAsk={handleAsk}
+                onOpenKLine={handleOpenKLine}
                 analyzingCode={analyzingCode}
               />
             ))
@@ -429,14 +437,14 @@ const DiscoverPage: React.FC = () => {
         ) : visibleStocks.length > 0 ? (
           <div className="overflow-hidden rounded-xl border border-border/45 bg-base/20">
             <div data-testid="discover-stock-table-scroll" className="max-h-[520px] overflow-auto">
-              <table className="min-w-[760px] w-full text-left text-sm">
+              <table className="min-w-[860px] w-full text-left text-sm">
                 <thead className="sticky top-0 z-10 border-b border-border/60 bg-card/95 text-xs uppercase text-muted-text backdrop-blur">
                   <tr>
                     <th className="px-3 py-2 font-medium">代码</th>
                     <th className="px-3 py-2 font-medium">名称</th>
                     <th className="px-3 py-2 font-medium">市场</th>
                     <th className="px-3 py-2 font-medium">行业</th>
-                    <th className="px-3 py-2 text-right font-medium">操作</th>
+                    <th className="w-[250px] px-3 py-2 text-right font-medium">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/45">
@@ -456,7 +464,18 @@ const DiscoverPage: React.FC = () => {
                         </Badge>
                       </td>
                       <td className="px-3 py-3">
-                        <div className="flex justify-end gap-2">
+                        <div className="flex justify-end gap-1.5">
+                          <Tooltip content="查看 K 线">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="w-9 px-0"
+                              onClick={() => handleOpenKLine(item.canonicalCode, item.nameZh)}
+                              aria-label={`查看 ${item.nameZh} K线`}
+                            >
+                              <ChartCandlestick className="h-4 w-4" />
+                            </Button>
+                          </Tooltip>
                           <Button
                             size="sm"
                             variant="secondary"
@@ -497,6 +516,13 @@ const DiscoverPage: React.FC = () => {
           <EmptyState title="没有匹配股票" description="" icon={<Search className="h-6 w-6" />} />
         )}
       </section>
+
+      <StockKLineDrawer
+        isOpen={Boolean(kLineStock)}
+        stockCode={kLineStock?.code}
+        stockName={kLineStock?.name}
+        onClose={() => setKLineStock(null)}
+      />
     </AppPage>
   );
 };
@@ -519,6 +545,7 @@ type RankingTileProps = {
   analyzingCode: string | null;
   onAnalyze: (stockCode: string, stockName: string) => Promise<void>;
   onAsk: (stockCode: string, stockName: string) => void;
+  onOpenKLine: (stockCode: string, stockName: string) => void;
 };
 
 const RankingTile: React.FC<RankingTileProps> = ({
@@ -527,6 +554,7 @@ const RankingTile: React.FC<RankingTileProps> = ({
   analyzingCode,
   onAnalyze,
   onAsk,
+  onOpenKLine,
 }) => (
   <div className="rounded-lg border border-border/55 bg-elevated/35 p-4 transition-colors hover:bg-hover/60">
     <div className="flex items-start justify-between gap-3">
@@ -551,6 +579,16 @@ const RankingTile: React.FC<RankingTileProps> = ({
     <div className="mt-3 flex items-center justify-between gap-2">
       <Badge variant={item.industry ? 'info' : 'default'}>{item.industry || '未分类'}</Badge>
       <div className="flex gap-1.5">
+        <Tooltip content="查看 K 线">
+          <Button
+            size="xsm"
+            variant="ghost"
+            onClick={() => onOpenKLine(item.code, item.name)}
+            aria-label={`查看 ${item.name} K线`}
+          >
+            <ChartCandlestick className="h-3.5 w-3.5" />
+          </Button>
+        </Tooltip>
         <Button
           size="xsm"
           variant="secondary"

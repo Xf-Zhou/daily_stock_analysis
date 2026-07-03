@@ -47,6 +47,31 @@ export type StockRankingsParams = {
   limit?: number;
 };
 
+export type KLineData = {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number | null;
+  amount?: number | null;
+  changePercent?: number | null;
+};
+
+export type StockHistoryResponse = {
+  stockCode: string;
+  stockName?: string | null;
+  period: 'daily';
+  data: KLineData[];
+};
+
+export type StockHistoryDays = 30 | 90 | 180 | 365;
+
+export type StockHistoryParams = {
+  days?: StockHistoryDays;
+  signal?: AbortSignal;
+};
+
 export const stocksApi = {
   async extractFromImage(file: File): Promise<ExtractFromImageResponse> {
     const formData = new FormData();
@@ -93,5 +118,21 @@ export const stocksApi = {
       { params }
     );
     return toCamelCase<StockRankingsResponse>(response.data);
+  },
+
+  async getHistory(stockCode: string, params: StockHistoryParams = {}): Promise<StockHistoryResponse> {
+    const { days = 90, signal } = params;
+    const encodedStockCode = encodeURIComponent(stockCode);
+    const response = await apiClient.get<Record<string, unknown>>(
+      `/api/v1/stocks/${encodedStockCode}/history`,
+      {
+        params: {
+          period: 'daily',
+          days,
+        },
+        signal,
+      },
+    );
+    return toCamelCase<StockHistoryResponse>(response.data);
   },
 };

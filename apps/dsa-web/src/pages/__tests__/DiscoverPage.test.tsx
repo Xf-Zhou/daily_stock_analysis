@@ -38,6 +38,18 @@ vi.mock('../../api/analysis', () => {
   };
 });
 
+vi.mock('../../components/stocks/StockKLineDrawer', () => ({
+  StockKLineDrawer: ({
+    isOpen,
+    stockCode,
+    stockName,
+  }: {
+    isOpen: boolean;
+    stockCode?: string;
+    stockName?: string;
+  }) => (isOpen ? <div data-testid="kline-drawer">{stockName} {stockCode}</div> : null),
+}));
+
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
@@ -222,6 +234,48 @@ describe('DiscoverPage', () => {
       }));
     });
     expect(await screen.findByText('分析已在进行')).toBeInTheDocument();
+  });
+
+  it('opens K-line drawer from the stock table action', async () => {
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '查看 贵州茅台 K线' }));
+
+    expect(screen.getByTestId('kline-drawer')).toHaveTextContent('贵州茅台 600519.SH');
+  });
+
+  it('opens K-line drawer from a ranking tile', async () => {
+    vi.mocked(stocksApi.getRankings).mockResolvedValueOnce({
+      status: 'ok',
+      source: 'mock',
+      updatedAt: '2026-06-21T00:00:00+00:00',
+      items: [
+        {
+          code: '00700.HK',
+          name: '腾讯控股',
+          market: 'HK',
+          industry: '互联网服务',
+          price: 400,
+          changePct: 3.1,
+          amount: 120000000,
+          volume: 1000000,
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看 腾讯控股 K线' }));
+
+    expect(screen.getByTestId('kline-drawer')).toHaveTextContent('腾讯控股 00700.HK');
   });
 
   it('paginates the discoverable stock list with compact page sizes', async () => {
