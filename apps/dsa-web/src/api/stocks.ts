@@ -16,7 +16,7 @@ export type ExtractFromImageResponse = {
 
 export type RankingMetric = 'change_pct' | 'amount' | 'volume';
 export type RankingDirection = 'asc' | 'desc';
-export type RankingStatus = 'ok' | 'partial' | 'stale' | 'unsupported';
+export type RankingStatus = 'ok' | 'partial' | 'stale' | 'unsupported' | 'unavailable';
 
 export type StockRankingItem = {
   code: string;
@@ -35,6 +35,7 @@ export type StockRankingsResponse = {
   status: RankingStatus;
   source?: string | null;
   updatedAt?: string | null;
+  message?: string | null;
   items: StockRankingItem[];
 };
 

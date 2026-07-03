@@ -97,12 +97,18 @@ class NewsIntelResponse(BaseModel):
 
     total: int = Field(..., description="新闻条数")
     items: List[NewsIntelItem] = Field(default_factory=list, description="新闻列表")
+    status: str = Field(..., description="查询状态：ok 表示有结果，empty 表示正常无关联资讯")
+    reason: str = Field(..., description="状态原因：has_news / no_news")
+    message: str = Field(..., description="面向用户的状态说明")
 
     class Config:
         json_schema_extra = {
             "example": {
                 "total": 2,
-                "items": []
+                "items": [],
+                "status": "ok",
+                "reason": "has_news",
+                "message": "已获取关联资讯"
             }
         }
 

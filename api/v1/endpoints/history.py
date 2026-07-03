@@ -349,6 +349,7 @@ def get_history_detail(
     response_model=NewsIntelResponse,
     responses={
         200: {"description": "新闻情报列表"},
+        404: {"description": "历史记录不存在", "model": ErrorResponse},
         500: {"description": "服务器错误", "model": ErrorResponse},
     },
     summary="获取历史报告关联新闻",
@@ -375,7 +376,15 @@ def get_history_news(
     """
     try:
         service = HistoryService(db_manager)
-        items = service.resolve_and_get_news(record_id=record_id, limit=limit)
+        result = service.resolve_and_get_news_result(record_id=record_id, limit=limit)
+        if not result.record_found:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "history_not_found",
+                    "message": "历史记录不存在"
+                }
+            )
 
         response_items = [
             NewsIntelItem(
@@ -383,14 +392,20 @@ def get_history_news(
                 snippet=item.get("snippet"),
                 url=item.get("url", "")
             )
-            for item in items
+            for item in result.items
         ]
+        has_news = len(response_items) > 0
 
         return NewsIntelResponse(
             total=len(response_items),
-            items=response_items
+            items=response_items,
+            status="ok" if has_news else "empty",
+            reason="has_news" if has_news else "no_news",
+            message="已获取关联资讯" if has_news else "该历史报告暂无关联资讯",
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"查询新闻情报失败: {e}", exc_info=True)
         raise HTTPException(

@@ -337,20 +337,20 @@
         }
       }
     },
-    "/api/v1/history/{query_id}/news": {
+    "/api/v1/history/{record_id}/news": {
       "get": {
         "tags": [
           "History"
         ],
         "summary": "获取历史报告关联新闻",
-        "description": "根据 query_id 获取关联的新闻情报列表（为空也返回 200）",
+        "description": "根据分析历史记录 ID 或 query_id 获取关联的新闻情报列表；正常无关联资讯时返回 200，并通过 status/reason/message 明确说明空结果",
         "operationId": "getHistoryNews",
         "parameters": [
           {
-            "name": "query_id",
+            "name": "record_id",
             "in": "path",
             "required": true,
-            "description": "分析记录唯一标识",
+            "description": "分析历史记录主键 ID（整数）或 query_id（字符串）",
             "schema": {
               "type": "string"
             }
@@ -374,6 +374,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/NewsIntelResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "历史记录不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1154,11 +1164,26 @@
               "$ref": "#/components/schemas/NewsIntelItem"
             },
             "description": "新闻列表"
+          },
+          "status": {
+            "type": "string",
+            "description": "查询状态：ok 表示有结果，empty 表示正常无关联资讯"
+          },
+          "reason": {
+            "type": "string",
+            "description": "状态原因：has_news / no_news"
+          },
+          "message": {
+            "type": "string",
+            "description": "面向用户的状态说明"
           }
         },
         "required": [
           "total",
-          "items"
+          "items",
+          "status",
+          "reason",
+          "message"
         ]
       },
       "HistoryItem": {

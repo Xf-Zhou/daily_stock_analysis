@@ -26,11 +26,12 @@ except ModuleNotFoundError:
 try:
     from fastapi.testclient import TestClient
     from api.app import create_app
-    from api.v1.endpoints.history import get_history_detail
+    from api.v1.endpoints.history import get_history_detail, get_history_news
 except ModuleNotFoundError:
     TestClient = None
     create_app = None
     get_history_detail = None
+    get_history_news = None
 
 from src.config import Config
 from src.storage import DatabaseManager, AnalysisHistory, BacktestResult
@@ -307,6 +308,58 @@ class AnalysisHistoryTestCase(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["meta"]["current_price"], 300.0)
         self.assertIsNone(payload["meta"]["change_pct"])
+
+    @patch("src.auth.is_auth_enabled", return_value=False)
+    def test_history_news_empty_response_explains_no_related_news(self, mock_auth) -> None:
+        """GET /api/v1/history/{id}/news should distinguish an empty result from an error."""
+        if TestClient is None or create_app is None:
+            self.skipTest("fastapi is not installed in this test environment")
+
+        record_id = self._save_history("query_news_empty_001")
+        static_dir = Path(self._temp_dir.name) / "empty-static"
+        static_dir.mkdir(exist_ok=True)
+        client = TestClient(create_app(static_dir=static_dir))
+
+        response = client.get(f"/api/v1/history/{record_id}/news?limit=8")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["total"], 0)
+        self.assertEqual(payload["items"], [])
+        self.assertEqual(payload["status"], "empty")
+        self.assertEqual(payload["reason"], "no_news")
+        self.assertEqual(payload["message"], "该历史报告暂无关联资讯")
+
+    @patch("src.auth.is_auth_enabled", return_value=False)
+    def test_history_news_missing_record_returns_404(self, mock_auth) -> None:
+        """A missing analysis record should not look like a successful empty news list."""
+        if TestClient is None or create_app is None:
+            self.skipTest("fastapi is not installed in this test environment")
+
+        static_dir = Path(self._temp_dir.name) / "empty-static"
+        static_dir.mkdir(exist_ok=True)
+        client = TestClient(create_app(static_dir=static_dir))
+
+        response = client.get("/api/v1/history/999999/news?limit=8")
+
+        self.assertEqual(response.status_code, 404)
+        payload = response.json()
+        self.assertEqual(payload["error"], "history_not_found")
+
+    def test_history_news_storage_error_returns_500(self) -> None:
+        """Storage failures should propagate to the endpoint error path, not become an empty list."""
+        if get_history_news is None:
+            self.skipTest("fastapi is not installed in this test environment")
+
+        class BrokenNewsDb:
+            def get_analysis_history_by_id(self, record_id: int):
+                raise RuntimeError("db unavailable")
+
+        with self.assertRaises(Exception) as context:
+            get_history_news("2", limit=8, db_manager=BrokenNewsDb())
+
+        self.assertEqual(getattr(context.exception, "status_code", None), 500)
+        self.assertEqual(context.exception.detail["error"], "internal_error")
 
     def test_history_detail_accepts_dict_raw_result(self) -> None:
         """_record_to_detail_dict should handle dict raw_result without json.loads errors."""

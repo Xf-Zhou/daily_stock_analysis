@@ -17,6 +17,9 @@ describe('ReportNews', () => {
   it('renders news items and refreshes with preserved subpanel styling', async () => {
     vi.mocked(historyApi.getNews).mockResolvedValue({
       total: 1,
+      status: 'ok',
+      reason: 'has_news',
+      message: '已获取关联资讯',
       items: [
         {
           title: '茅台发布最新经营数据',
@@ -43,18 +46,24 @@ describe('ReportNews', () => {
   it('renders the empty state when no news exists', async () => {
     vi.mocked(historyApi.getNews).mockResolvedValue({
       total: 0,
+      status: 'empty',
+      reason: 'no_news',
+      message: '该历史报告暂无关联资讯',
       items: [],
     });
 
     render(<ReportNews recordId={1} />);
 
     expect(await screen.findByText('暂无相关资讯')).toBeInTheDocument();
-    expect(screen.getByText('可稍后刷新以获取最新资讯。')).toBeInTheDocument();
+    expect(screen.getByText('该历史报告暂无关联资讯')).toBeInTheDocument();
   });
 
   it('localizes the empty state description for english reports', async () => {
     vi.mocked(historyApi.getNews).mockResolvedValue({
       total: 0,
+      status: 'empty',
+      reason: 'no_news',
+      message: '该历史报告暂无关联资讯',
       items: [],
     });
 
@@ -62,6 +71,7 @@ describe('ReportNews', () => {
 
     expect(await screen.findByText('No related news')).toBeInTheDocument();
     expect(screen.getByText('Refresh later to check for the latest updates.')).toBeInTheDocument();
+    expect(screen.queryByText('该历史报告暂无关联资讯')).not.toBeInTheDocument();
   });
 
   it('renders the error state and supports retry', async () => {
@@ -69,6 +79,9 @@ describe('ReportNews', () => {
       .mockRejectedValueOnce(new Error('network failed'))
       .mockResolvedValueOnce({
         total: 1,
+        status: 'ok',
+        reason: 'has_news',
+        message: '已获取关联资讯',
         items: [
           {
             title: '重试成功',

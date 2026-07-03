@@ -181,6 +181,25 @@ describe('DiscoverPage', () => {
     expect(screen.getByTestId('discover-compact-metrics')).toHaveTextContent('行业覆盖率');
   });
 
+  it('distinguishes unavailable rankings from empty ranking results', async () => {
+    vi.mocked(stocksApi.getRankings).mockResolvedValueOnce({
+      status: 'unavailable',
+      source: null,
+      updatedAt: null,
+      message: '批量行情源暂不可用，且没有可用缓存',
+      items: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('行情源不可用')).toBeInTheDocument();
+    expect(screen.getByText('批量行情源暂不可用，且没有可用缓存')).toBeInTheDocument();
+  });
+
   it('submits analysis with discover selection source and shows duplicate task feedback', async () => {
     vi.mocked(analysisApi.analyzeAsync).mockRejectedValueOnce(
       new DuplicateTaskError('600519.SH', 'task-1', '股票 600519.SH 正在分析中'),

@@ -94,9 +94,10 @@ class StockRankingItem(BaseModel):
 class StockRankingsResponse(BaseModel):
     """股票行情榜单响应"""
 
-    status: Literal["ok", "partial", "stale", "unsupported"] = Field(..., description="榜单状态")
+    status: Literal["ok", "partial", "stale", "unsupported", "unavailable"] = Field(..., description="榜单状态")
     source: Optional[str] = Field(None, description="整体实际成功返回行情的数据源")
     updated_at: Optional[str] = Field(None, description="整体更新时间")
+    message: Optional[str] = Field(None, description="状态说明，通常用于行情源不可用等空结果原因")
     items: List[StockRankingItem] = Field(default_factory=list, description="榜单条目")
 
 

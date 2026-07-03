@@ -29,10 +29,12 @@ SUPPORTED_METRICS = {"change_pct", "amount", "volume"}
 SUPPORTED_DIRECTIONS = {"asc", "desc"}
 BATCH_CACHE_TTL_SECONDS = 300
 BATCH_SOURCE_TIMEOUT_SECONDS = 30
+NO_BATCH_CACHE_MESSAGE = "批量行情源暂不可用，且没有可用缓存"
 US_CORE_POOL_LIMIT = 100
 US_CONCURRENCY = 5
 US_SYMBOL_TIMEOUT_SECONDS = 12
 US_OVERALL_TIMEOUT_SECONDS = 25
+RankingStatus = Literal["ok", "partial", "stale", "unsupported", "unavailable"]
 
 
 @dataclass(frozen=True)
@@ -40,7 +42,7 @@ class BatchQuoteResult:
     df: pd.DataFrame
     source: str | None
     updated_at: datetime | None
-    status: Literal["ok", "partial", "stale", "unsupported"]
+    status: RankingStatus
 
 
 @dataclass
@@ -49,7 +51,7 @@ class _BatchCache:
     source: str
     updated_at: datetime
     timestamp: float
-    status: Literal["ok", "partial", "stale", "unsupported"] = "ok"
+    status: RankingStatus = "ok"
 
 
 _BATCH_CACHE: dict[str, _BatchCache] = {}
@@ -103,6 +105,7 @@ class StockDiscoveryService:
                 quote_result.status,
                 source=quote_result.source,
                 updated_at=quote_result.updated_at,
+                message=NO_BATCH_CACHE_MESSAGE if quote_result.status == "unavailable" else None,
             )
 
         quote_lookup = self._build_quote_lookup(quote_result.df, market)
@@ -227,7 +230,7 @@ class StockDiscoveryService:
                 cached = _BATCH_CACHE.get(cache_key)
                 if cached:
                     return BatchQuoteResult(cached.df, cached.source, cached.updated_at, "stale")
-            return BatchQuoteResult(pd.DataFrame(), None, None, "stale")
+            return BatchQuoteResult(pd.DataFrame(), None, None, "unavailable")
 
     @staticmethod
     def _coerce_fetcher_batch_result(
@@ -457,7 +460,7 @@ class StockDiscoveryService:
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
 
-        status: Literal["ok", "partial", "stale", "unsupported"] = "ok"
+        status: RankingStatus = "ok"
         if failed:
             status = "partial"
         if not rows and failed:
@@ -543,13 +546,17 @@ class StockDiscoveryService:
         status: str,
         source: str | None = None,
         updated_at: datetime | str | None = None,
+        message: str | None = None,
     ) -> dict[str, Any]:
-        return {
+        payload = {
             "status": status,
             "source": source,
             "updated_at": StockDiscoveryService._format_dt(updated_at),
             "items": [],
         }
+        if message:
+            payload["message"] = message
+        return payload
 
     @staticmethod
     def _repo_root() -> Path:

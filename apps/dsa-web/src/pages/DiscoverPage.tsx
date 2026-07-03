@@ -55,6 +55,7 @@ const STATUS_META: Record<RankingStatus, { label: string; variant: 'default' | '
   partial: { label: '部分', variant: 'warning' },
   stale: { label: '缓存', variant: 'warning' },
   unsupported: { label: '不可用', variant: 'default' },
+  unavailable: { label: '失败', variant: 'danger' },
 };
 
 type ActionNotice = {
@@ -102,6 +103,7 @@ const DiscoverPage: React.FC = () => {
   const [rankings, setRankings] = useState<StockRankingItem[]>([]);
   const [rankingStatus, setRankingStatus] = useState<RankingStatus>('unsupported');
   const [rankingUpdatedAt, setRankingUpdatedAt] = useState<string | null>(null);
+  const [rankingMessage, setRankingMessage] = useState<string | null>(null);
   const [rankingLoading, setRankingLoading] = useState(false);
   const [rankingError, setRankingError] = useState<string | null>(null);
   const [analyzingCode, setAnalyzingCode] = useState<string | null>(null);
@@ -178,6 +180,7 @@ const DiscoverPage: React.FC = () => {
     let cancelled = false;
     setRankingLoading(true);
     setRankingError(null);
+    setRankingMessage(null);
 
     stocksApi.getRankings({
       market,
@@ -191,11 +194,13 @@ const DiscoverPage: React.FC = () => {
         setRankings(payload.items ?? []);
         setRankingStatus(payload.status);
         setRankingUpdatedAt(payload.updatedAt ?? null);
+        setRankingMessage(payload.message ?? null);
       })
       .catch((requestError: unknown) => {
         if (cancelled) return;
         setRankings([]);
         setRankingStatus('unsupported');
+        setRankingMessage(null);
         setRankingError(getErrorMessage(requestError, '榜单暂时不可用'));
       })
       .finally(() => {
@@ -261,6 +266,14 @@ const DiscoverPage: React.FC = () => {
   const visibleStart = filteredStocks.length > 0 ? pageStartIndex + 1 : 0;
   const visibleEnd = pageStartIndex + visibleStocks.length;
   const statusMeta = STATUS_META[rankingStatus];
+  const rankingEmptyTitle = rankingStatus === 'unsupported'
+    ? '暂无榜单数据'
+    : rankingStatus === 'unavailable'
+      ? '行情源不可用'
+      : '没有匹配榜单';
+  const rankingEmptyDescription = rankingStatus === 'unavailable'
+    ? rankingMessage || '批量行情源暂不可用，且没有可用缓存'
+    : '';
 
   return (
     <AppPage className="space-y-4">
@@ -378,8 +391,8 @@ const DiscoverPage: React.FC = () => {
           ) : (
             <div className="lg:col-span-2 xl:col-span-4">
               <EmptyState
-                title={rankingStatus === 'unsupported' ? '暂无榜单数据' : '没有匹配榜单'}
-                description=""
+                title={rankingEmptyTitle}
+                description={rankingEmptyDescription}
                 icon={<AlertCircle className="h-6 w-6" />}
               />
             </div>

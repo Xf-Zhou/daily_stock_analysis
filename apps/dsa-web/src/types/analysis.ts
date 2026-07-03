@@ -233,6 +233,9 @@ export interface NewsIntelItem {
 export interface NewsIntelResponse {
   total: number;
   items: NewsIntelItem[];
+  status: 'ok' | 'empty' | string;
+  reason: 'has_news' | 'no_news' | string;
+  message: string;
 }
 
 /** History filter parameters */

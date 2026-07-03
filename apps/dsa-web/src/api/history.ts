@@ -65,6 +65,9 @@ export const historyApi = {
     return {
       total: data.total,
       items: (data.items || []).map(item => toCamelCase<NewsIntelItem>(item)),
+      status: data.status || (data.total > 0 ? 'ok' : 'empty'),
+      reason: data.reason || (data.total > 0 ? 'has_news' : 'no_news'),
+      message: data.message || '',
     };
   },
 

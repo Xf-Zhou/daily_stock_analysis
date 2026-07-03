@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 <!-- 新条目格式：- [类型] 描述（类型取值：新功能/改进/修复/文档/测试/chore）-->
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
+- [修复] 历史报告关联资讯接口新增空结果状态说明并区分历史记录不存在与查询异常，Web 空态同步展示明确提示。
+- [修复] Web 英文报告关联资讯空态不再直接展示后端中文 message，改用本地化空态说明。
 - [chore] 将 README、文档、GitHub 配置、Docker 发布说明与桌面端发布/更新检查迁移到 `Xf-Zhou/daily_stock_analysis` 自有仓库。
 - [新功能] 通知网关新增 ntfy 一等渠道，支持通过 `NTFY_URL` / `NTFY_TOKEN` 推送并接入 Web 测试、路由、Actions 与诊断。
 - [新功能] 通知网关新增 Gotify 一等渠道，支持通过 `GOTIFY_URL` / `GOTIFY_TOKEN` 推送 Markdown 文本并接入 Web 测试、路由、Actions 与诊断。
@@ -49,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] 股票榜单批量行情复用现有超时、限流、熔断和缓存保护，并为美股核心池增加 TTL 缓存。
 - [修复] 收紧股票索引 `industrySource` 为 `tushare` / `override` / `unknown`，并保持旧 10 字段 tuple 的 TypeScript 兼容性。
 - [修复] 股票榜单在行情源 fallback 后返回实际成功的数据源标识，避免 `source` 仍显示主数据源。
+- [修复] 股票榜单行情源失败且无缓存时返回 `status=unavailable` 和说明文案，避免与筛选后自然空列表混淆。
 - [修复] Web 首页「追问 AI」进入问股时等待历史报告上下文加载完成再发送，确保请求携带原报告摘要、策略和价格信息。
 - [修复] 港股问股实时行情 AkShare 主/备接口增加调用超时，避免外部数据源卡住时聊天请求长期停留在处理中。
 - [新功能] Web 问股新增会话级历史报告追问上下文，支持刷新、服务重启和切换会话后恢复可见卡片并继续注入给后续追问。

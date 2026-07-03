@@ -5,7 +5,7 @@ import { getParsedApiError } from '../../api/error';
 import { ApiErrorAlert, Card } from '../common';
 import { DashboardPanelHeader, DashboardStateBlock } from '../dashboard';
 import { historyApi } from '../../api/history';
-import type { NewsIntelItem, ReportLanguage } from '../../types/analysis';
+import type { NewsIntelItem, NewsIntelResponse, ReportLanguage } from '../../types/analysis';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
 
 interface ReportNewsProps {
@@ -13,6 +13,17 @@ interface ReportNewsProps {
   limit?: number;
   language?: ReportLanguage;
 }
+
+const getEmptyNewsDescription = (
+  response: NewsIntelResponse,
+  language: ReportLanguage,
+  fallback: string,
+) => {
+  if (response.status !== 'empty') return null;
+  if (language === 'zh' && response.message) return response.message;
+  if (response.reason === 'no_news') return fallback;
+  return fallback;
+};
 
 /**
  * 资讯区组件 - 终端风格
@@ -23,25 +34,29 @@ export const ReportNews: React.FC<ReportNewsProps> = ({ recordId, limit = 8, lan
   const [isLoading, setIsLoading] = useState(false);
   const [items, setItems] = useState<NewsIntelItem[]>([]);
   const [error, setError] = useState<ParsedApiError | null>(null);
+  const [emptyMessage, setEmptyMessage] = useState<string | null>(null);
 
   const fetchNews = useCallback(async () => {
     if (!recordId) return;
     setIsLoading(true);
     setError(null);
+    setEmptyMessage(null);
 
     try {
       const response = await historyApi.getNews(recordId, limit);
       setItems(response.items || []);
+      setEmptyMessage(getEmptyNewsDescription(response, reportLanguage, text.noNewsDescription));
     } catch (err) {
       setError(getParsedApiError(err));
     } finally {
       setIsLoading(false);
     }
-  }, [recordId, limit]);
+  }, [recordId, limit, reportLanguage, text.noNewsDescription]);
 
   useEffect(() => {
     setItems([]);
     setError(null);
+    setEmptyMessage(null);
 
     if (recordId) {
       fetchNews();
@@ -95,7 +110,7 @@ export const ReportNews: React.FC<ReportNewsProps> = ({ recordId, limit = 8, lan
         <DashboardStateBlock
           compact
           title={text.noNews}
-          description={text.noNewsDescription}
+          description={emptyMessage || text.noNewsDescription}
           icon={(
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 14l-7-7m0 0l-7 7m7-7v18" />

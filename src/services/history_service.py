@@ -10,6 +10,7 @@ Responsibilities:
 3. Generate detailed reports in Markdown format
 """
 from __future__ import annotations
+from dataclasses import dataclass
 import json
 import logging
 from datetime import date, datetime, timedelta
@@ -34,6 +35,14 @@ if TYPE_CHECKING:
     from src.analyzer import AnalysisResult
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class HistoryNewsLookupResult:
+    """Resolved history-news lookup result."""
+
+    record_found: bool
+    items: List[Dict[str, str]]
 
 
 class MarkdownReportGenerationError(Exception):
@@ -187,15 +196,23 @@ class HistoryService:
         Returns:
             List of news intel dicts
         """
-        try:
-            record = self._resolve_record(record_id)
-            if not record:
-                logger.warning(f"resolve_and_get_news: record not found for {record_id}")
-                return []
-            return self.get_news_intel(query_id=record.query_id, limit=limit)
-        except Exception as e:
-            logger.error(f"resolve_and_get_news failed for {record_id}: {e}", exc_info=True)
-            return []
+        return self.resolve_and_get_news_result(record_id=record_id, limit=limit).items
+
+    def resolve_and_get_news_result(self, record_id: str, limit: int = 20) -> HistoryNewsLookupResult:
+        """
+        Resolve record_id and return associated news plus lookup metadata.
+
+        Raises storage/query exceptions so API callers can distinguish failures
+        from a successful lookup with no related news.
+        """
+        record = self._resolve_record(record_id)
+        if not record:
+            logger.warning(f"resolve_and_get_news: record not found for {record_id}")
+            return HistoryNewsLookupResult(record_found=False, items=[])
+        return HistoryNewsLookupResult(
+            record_found=True,
+            items=self.get_news_intel(query_id=record.query_id, limit=limit),
+        )
 
     def get_history_detail_by_id(self, record_id: int) -> Optional[Dict[str, Any]]:
         """
@@ -316,28 +333,23 @@ class HistoryService:
         Returns:
             List of news intelligence (containing title, snippet, and url)
         """
-        try:
-            records = self.db.get_news_intel_by_query_id(query_id=query_id, limit=limit)
+        records = self.db.get_news_intel_by_query_id(query_id=query_id, limit=limit)
 
-            if not records:
-                records = self._fallback_news_by_analysis_context(query_id=query_id, limit=limit)
+        if not records:
+            records = self._fallback_news_by_analysis_context(query_id=query_id, limit=limit)
 
-            items: List[Dict[str, str]] = []
-            for record in records:
-                snippet = (record.snippet or "").strip()
-                if len(snippet) > 200:
-                    snippet = f"{snippet[:197]}..."
-                items.append({
-                    "title": record.title,
-                    "snippet": snippet,
-                    "url": record.url,
-                })
+        items: List[Dict[str, str]] = []
+        for record in records:
+            snippet = (record.snippet or "").strip()
+            if len(snippet) > 200:
+                snippet = f"{snippet[:197]}..."
+            items.append({
+                "title": record.title,
+                "snippet": snippet,
+                "url": record.url,
+            })
 
-            return items
-
-        except Exception as e:
-            logger.error(f"查询新闻情报失败: {e}", exc_info=True)
-            return []
+        return items
 
     def get_news_intel_by_record_id(self, record_id: int, limit: int = 20) -> List[Dict[str, str]]:
         """

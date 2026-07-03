@@ -219,7 +219,7 @@ class StockRankingsTestCase(unittest.TestCase):
         self.assertEqual(payload["source"], "akshare_hk_sina")
         self.assertEqual(payload["items"][0]["source"], "akshare_hk_sina")
 
-    def test_rankings_reports_no_source_when_all_batch_sources_fail_without_cache(self):
+    def test_rankings_reports_unavailable_when_all_batch_sources_fail_without_cache(self):
         service = StockDiscoveryService(
             index_entries=[
                 _entry("000001.SZ", "000001", "平安银行", "CN", "银行"),
@@ -229,8 +229,10 @@ class StockRankingsTestCase(unittest.TestCase):
         with patch.object(service, "_fetch_cn_batch_quotes", side_effect=RuntimeError("all sources down")):
             payload = service.get_rankings(market="CN", metric="change_pct", direction="desc")
 
-        self.assertEqual(payload["status"], "stale")
+        self.assertEqual(payload["status"], "unavailable")
         self.assertIsNone(payload["source"])
+        self.assertIsNone(payload["updated_at"])
+        self.assertIn("没有可用缓存", payload["message"])
         self.assertEqual(payload["items"], [])
 
     def test_rankings_reports_unsupported_when_us_core_pool_is_empty(self):
@@ -304,6 +306,29 @@ class StockRankingsTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "unsupported")
+
+    def test_rankings_route_accepts_unavailable_status(self):
+        auth._auth_enabled = None
+        app = create_app()
+        client = TestClient(app)
+
+        with patch("api.middlewares.auth.is_auth_enabled", return_value=False), \
+             patch("src.auth.is_auth_enabled", return_value=False), \
+             patch(
+                 "api.v1.endpoints.stocks.StockDiscoveryService.get_rankings",
+                 return_value={
+                     "status": "unavailable",
+                     "source": None,
+                     "updated_at": None,
+                     "message": "批量行情源暂不可用，且没有可用缓存",
+                     "items": [],
+                 },
+             ):
+            response = client.get("/api/v1/stocks/rankings?market=CN")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "unavailable")
+        self.assertIn("没有可用缓存", response.json()["message"])
 
 
 if __name__ == "__main__":
