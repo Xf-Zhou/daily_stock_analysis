@@ -101,7 +101,7 @@ class StockService:
         Args:
             stock_code: 股票代码
             period: K 线周期 (daily/weekly/monthly)
-            days: 获取天数
+            days: 自然日窗口天数
             force_refresh: 是否跳过新鲜缓存并尝试刷新外部源
             
         Returns:
@@ -124,7 +124,12 @@ class StockService:
                 force_refresh=force_refresh,
             )
             stock_name = get_index_stock_name(stock_code)
-            data = self._serialize_history_rows(snapshot.df, snapshot.effective_days)
+            data = self._serialize_history_rows(
+                snapshot.df,
+                snapshot.effective_days,
+                start_date=snapshot.start_date,
+                end_date=snapshot.end_date,
+            )
 
             return {
                 "stock_code": stock_code,
@@ -133,7 +138,7 @@ class StockService:
                 "source": snapshot.source,
                 "cache_hit": snapshot.cache_hit,
                 "stale": snapshot.stale,
-                "partial_cache": snapshot.cache_hit and 0 < len(data) < snapshot.effective_days,
+                "partial_cache": snapshot.partial_cache,
                 "as_of_date": data[-1]["date"] if data else snapshot.as_of_date,
                 "actual_records": len(data),
                 "requested_days": snapshot.requested_days,
@@ -183,7 +188,13 @@ class StockService:
         return text[:10]
 
     @classmethod
-    def _serialize_history_rows(cls, df: Any, effective_days: int) -> List[Dict[str, Any]]:
+    def _serialize_history_rows(
+        cls,
+        df: Any,
+        effective_days: int,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         if df is None or getattr(df, "empty", True):
             return []
 
@@ -216,6 +227,12 @@ class StockService:
             })
 
         rows.sort(key=lambda item: item["date"])
+        if start_date or end_date:
+            if start_date:
+                rows = [item for item in rows if item["date"] >= start_date]
+            if end_date:
+                rows = [item for item in rows if item["date"] <= end_date]
+            return rows
         return rows[-effective_days:]
     
     def _get_placeholder_quote(self, stock_code: str) -> Dict[str, Any]:

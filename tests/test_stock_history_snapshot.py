@@ -47,6 +47,10 @@ def _rows(code: str, latest: date, count: int) -> list[_DailyRow]:
     return [_DailyRow(code, start + timedelta(days=offset), close=10.0 + offset) for offset in range(count)]
 
 
+def _df_rows(code: str, latest: date, count: int) -> pd.DataFrame:
+    return pd.DataFrame([row.to_dict() for row in _rows(code, latest, count)])
+
+
 class _FakeDb:
     def __init__(self, rows_by_code=None) -> None:
         self.rows_by_code = rows_by_code or {}
@@ -88,19 +92,96 @@ class StockHistorySnapshotTestCase(unittest.TestCase):
         stale_latest = date(2026, 3, 26)
         db = _FakeDb({"600519": _rows("600519", stale_latest, 30)})
         manager = SimpleNamespace(get_daily_data=MagicMock(return_value=(None, "none")))
+        expected_start = effective - timedelta(days=59)
 
         with patch("src.storage.get_db", return_value=db), \
              patch("src.services.history_loader._get_fetcher_manager", return_value=manager), \
              patch("src.core.trading_calendar.get_effective_trading_date", return_value=effective):
             result = load_history_snapshot("600519", days=60, force_refresh=True)
 
-        manager.get_daily_data.assert_called_once_with("600519", days=60)
+        manager.get_daily_data.assert_called_once_with(
+            "600519",
+            start_date=expected_start.isoformat(),
+            end_date=effective.isoformat(),
+            days=60,
+        )
         self.assertEqual(result.source, "db_cache")
         self.assertTrue(result.cache_hit)
         self.assertTrue(result.stale)
         self.assertIn("缓存", result.message)
         self.assertEqual(result.as_of_date, "2026-03-26")
         self.assertEqual(len(result.df), 30)
+
+    def test_short_fresh_db_cache_fetches_when_longer_range_requested(self) -> None:
+        from src.services.history_loader import load_history_snapshot
+
+        effective = date(2026, 3, 27)
+        db = _FakeDb({"000001": _rows("000001", effective, 90)})
+        network_df = _df_rows("000001", effective, 180)
+        manager = SimpleNamespace(get_daily_data=MagicMock(return_value=(network_df, "eastmoney")))
+        expected_start = effective - timedelta(days=179)
+
+        with patch("src.storage.get_db", return_value=db), \
+             patch("src.services.history_loader._get_fetcher_manager", return_value=manager), \
+             patch("src.core.trading_calendar.get_effective_trading_date", return_value=effective):
+            result = load_history_snapshot("000001.SZ", days=180)
+
+        manager.get_daily_data.assert_called_once_with(
+            "000001.SZ",
+            start_date=expected_start.isoformat(),
+            end_date=effective.isoformat(),
+            days=180,
+        )
+        self.assertEqual(result.source, "eastmoney")
+        self.assertFalse(result.cache_hit)
+        self.assertFalse(result.stale)
+        self.assertEqual(len(result.df), 180)
+
+    def test_short_fresh_db_cache_falls_back_as_stale_when_longer_range_fetch_fails(self) -> None:
+        from src.services.history_loader import load_history_snapshot
+
+        effective = date(2026, 3, 27)
+        db = _FakeDb({"000001": _rows("000001", effective, 90)})
+        manager = SimpleNamespace(get_daily_data=MagicMock(return_value=(None, "none")))
+        expected_start = effective - timedelta(days=179)
+
+        with patch("src.storage.get_db", return_value=db), \
+             patch("src.services.history_loader._get_fetcher_manager", return_value=manager), \
+             patch("src.core.trading_calendar.get_effective_trading_date", return_value=effective):
+            result = load_history_snapshot("000001.SZ", days=180)
+
+        manager.get_daily_data.assert_called_once_with(
+            "000001.SZ",
+            start_date=expected_start.isoformat(),
+            end_date=effective.isoformat(),
+            days=180,
+        )
+        self.assertEqual(result.source, "db_cache")
+        self.assertTrue(result.cache_hit)
+        self.assertTrue(result.stale)
+        self.assertTrue(result.partial_cache)
+        self.assertEqual(result.actual_records, 90)
+        self.assertEqual(result.effective_days, 180)
+        self.assertIn("缓存", result.message)
+
+    def test_snapshot_uses_calendar_window_for_long_ranges(self) -> None:
+        from src.services.history_loader import load_history_snapshot
+
+        effective = date(2026, 7, 3)
+        expected_start = date(2025, 7, 4)
+        db = _FakeDb({"000001": _rows("000001", effective, 600)})
+        manager = SimpleNamespace(get_daily_data=MagicMock())
+
+        with patch("src.storage.get_db", return_value=db), \
+             patch("src.services.history_loader._get_fetcher_manager", return_value=manager), \
+             patch("src.core.trading_calendar.get_effective_trading_date", return_value=effective):
+            result = load_history_snapshot("000001.SZ", days=365)
+
+        manager.get_daily_data.assert_not_called()
+        self.assertEqual(result.source, "db_cache")
+        self.assertEqual(result.start_date, expected_start.isoformat())
+        self.assertEqual(result.end_date, effective.isoformat())
+        self.assertGreaterEqual(min(row.date for row in result.df.itertuples()), expected_start)
 
     def test_network_success_persists_with_normalized_write_code(self) -> None:
         from src.services.history_loader import load_history_snapshot
@@ -159,6 +240,40 @@ class StockHistorySnapshotTestCase(unittest.TestCase):
         self.assertTrue(result["cache_hit"])
         self.assertEqual(len(result["data"]), 1)
         self.assertEqual(result["data"][0]["date"], "2026-03-25")
+
+    def test_stock_service_filters_rows_to_calendar_window(self) -> None:
+        from src.services.history_loader import HistoryLoadResult
+        from src.services.stock_service import StockService
+
+        raw_df = pd.DataFrame(
+            [
+                {"date": "2024-12-27", "open": 10, "high": 11, "low": 9, "close": 10.5},
+                {"date": "2025-07-03", "open": 10, "high": 11, "low": 9, "close": 10.5},
+                {"date": "2025-07-04", "open": 10, "high": 11, "low": 9, "close": 10.5},
+                {"date": "2026-07-03", "open": 10, "high": 11, "low": 9, "close": 10.5},
+            ]
+        )
+        snapshot = HistoryLoadResult(
+            df=raw_df,
+            source="db_cache",
+            cache_hit=True,
+            stale=False,
+            partial_cache=False,
+            as_of_date="2026-07-03",
+            requested_days=365,
+            effective_days=365,
+            actual_records=4,
+            message=None,
+            start_date="2025-07-04",
+            end_date="2026-07-03",
+        )
+
+        with patch("src.services.stock_service.load_history_snapshot", return_value=snapshot), \
+             patch("src.services.stock_service.get_index_stock_name", return_value="平安银行"):
+            result = StockService().get_history_data("000001.SZ", days=365)
+
+        self.assertEqual([row["date"] for row in result["data"]], ["2025-07-04", "2026-07-03"])
+        self.assertFalse(result["partial_cache"])
 
     def test_history_endpoint_exposes_metadata_and_force_refresh(self) -> None:
         auth._auth_enabled = None

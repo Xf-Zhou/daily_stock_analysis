@@ -147,6 +147,8 @@ class HistoryLoadResult:
     effective_days: int
     actual_records: int
     message: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
 
 
 def _bars_to_df(bars: list) -> pd.DataFrame:
@@ -186,10 +188,13 @@ def _make_result(
     stale: bool,
     requested_days: int,
     effective_days: int,
+    start: Optional[date] = None,
+    end: Optional[date] = None,
+    partial_cache: bool = False,
     message: Optional[str] = None,
 ) -> HistoryLoadResult:
     if df is not None and not df.empty:
-        actual_records = min(effective_days, len(df))
+        actual_records = len(df)
         as_of = _latest_df_date(df)
     else:
         actual_records = 0
@@ -200,13 +205,26 @@ def _make_result(
         source=source,
         cache_hit=cache_hit,
         stale=stale,
-        partial_cache=cache_hit and 0 < actual_records < effective_days,
+        partial_cache=partial_cache,
         as_of_date=as_of.isoformat() if as_of else None,
         requested_days=requested_days,
         effective_days=effective_days,
         actual_records=actual_records,
         message=message,
+        start_date=start.isoformat() if start else None,
+        end_date=end.isoformat() if end else None,
     )
+
+
+def _bars_cover_calendar_window(bars: list, start: date, end: date) -> bool:
+    if not bars:
+        return False
+    dates = [_bar_date(bar) for bar in bars]
+    latest_date = max(dates, default=date.min)
+    earliest_date = min(dates, default=date.max)
+    # A range may begin on a weekend or market holiday, so allow the first
+    # available bar to be a few calendar days after the requested window start.
+    return latest_date >= end and earliest_date <= start + timedelta(days=7)
 
 
 def load_history_snapshot(
@@ -225,23 +243,23 @@ def load_history_snapshot(
     requested_days = days
     effective_days = _normalize_history_days(days)
     end = _effective_history_end(stock_code, target_date)
-    start = end - timedelta(days=int(effective_days * 1.8) + 10)
+    start = end - timedelta(days=max(effective_days - 1, 0))
 
     db = None
     stale_df: Optional[pd.DataFrame] = None
     fresh_df: Optional[pd.DataFrame] = None
-    required_records = max(min(effective_days, _CACHE_MIN_RECORDS), 1)
+    stale_is_partial = False
 
     try:
         db = get_db()
         _code, bars = _select_best_bars(db, stock_code, start, end)
-        latest_date = max((_bar_date(bar) for bar in bars), default=date.min)
         if bars:
             candidate_df = _bars_to_df(bars)
-            if latest_date >= end and len(bars) >= required_records:
+            if _bars_cover_calendar_window(bars, start, end):
                 fresh_df = candidate_df
             else:
                 stale_df = candidate_df
+                stale_is_partial = True
     except Exception as e:
         logger.debug("load_history_snapshot(%s): DB read failed: %s", stock_code, e)
 
@@ -253,11 +271,18 @@ def load_history_snapshot(
             stale=False,
             requested_days=requested_days,
             effective_days=effective_days,
+            start=start,
+            end=end,
         )
 
     try:
         manager = _get_fetcher_manager()
-        df, source = manager.get_daily_data(stock_code, days=effective_days)
+        df, source = manager.get_daily_data(
+            stock_code,
+            start_date=start.isoformat(),
+            end_date=end.isoformat(),
+            days=effective_days,
+        )
         if df is not None and not df.empty:
             _, normalized_code = _history_code_candidates(stock_code)
             if db is None:
@@ -281,6 +306,8 @@ def load_history_snapshot(
                 stale=False,
                 requested_days=requested_days,
                 effective_days=effective_days,
+                start=start,
+                end=end,
             )
     except Exception as e:
         logger.warning("load_history_snapshot(%s): DataFetcherManager failed: %s", stock_code, e)
@@ -294,6 +321,9 @@ def load_history_snapshot(
             stale=True,
             requested_days=requested_days,
             effective_days=effective_days,
+            start=start,
+            end=end,
+            partial_cache=stale_is_partial,
             message="实时行情源暂不可用，正在展示本地缓存 K 线数据。",
         )
 
@@ -304,6 +334,8 @@ def load_history_snapshot(
         stale=False,
         requested_days=requested_days,
         effective_days=effective_days,
+        start=start,
+        end=end,
         message="暂无 K 线数据，可能是行情源暂不可用。",
     )
 

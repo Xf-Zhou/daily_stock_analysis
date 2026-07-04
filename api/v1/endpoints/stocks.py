@@ -371,7 +371,7 @@ def get_stock_quote(stock_code: str) -> StockQuote:
 def get_stock_history(
     stock_code: str,
     period: str = Query("daily", description="K 线周期", pattern="^(daily|weekly|monthly)$"),
-    days: int = Query(30, ge=1, le=365, description="获取天数"),
+    days: int = Query(30, ge=1, le=365, description="自然日窗口天数"),
     force_refresh: bool = Query(False, description="是否跳过新鲜缓存并尝试刷新外部行情源")
 ) -> StockHistoryResponse:
     """
@@ -382,7 +382,7 @@ def get_stock_history(
     Args:
         stock_code: 股票代码
         period: K 线周期 (daily/weekly/monthly)
-        days: 获取天数
+        days: 自然日窗口天数
         force_refresh: 是否跳过新鲜缓存
         
     Returns:

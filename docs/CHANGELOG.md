@@ -70,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [测试] 增加股票历史缓存快照、stale fallback、K 线刷新状态、均线和 crosshair 清理测试。
 - [修复] 修正 K 线图重复日期归一化、无 ResizeObserver 时 crosshair 订阅清理和缺失涨跌幅展示。
 - [修复] 固定 K 线图十字光标信息条高度，避免悬浮时行情信息换行导致图表整体下移。
+- [修复] 股票历史 API 的 30/90/180/365 天 K 线改为按自然日窗口裁剪，并在缓存未覆盖窗口时先尝试补拉外部行情源。
 
 ## [3.16.0] - 2026-05-10
 

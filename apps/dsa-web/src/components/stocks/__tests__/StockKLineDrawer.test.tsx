@@ -33,6 +33,21 @@ const historyPayload = (code = '000001.SZ'): StockHistoryResponse => ({
   ],
 });
 
+const historyPayloadWithRecords = (days: number, records: number): StockHistoryResponse => ({
+  ...historyPayload(),
+  requestedDays: days,
+  effectiveDays: days,
+  actualRecords: records,
+  data: Array.from({ length: records }, (_, index) => ({
+    date: `2026-06-${String(index + 1).padStart(2, '0')}`,
+    open: 10,
+    high: 11,
+    low: 9,
+    close: 10.5,
+    volume: 1000,
+  })),
+});
+
 describe('StockKLineDrawer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -124,6 +139,32 @@ describe('StockKLineDrawer', () => {
 
     expect(await screen.findByTestId('kline-chart')).toHaveTextContent('chart 1');
     expect(stocksApi.getHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reuse the 90-day session cache when switching to 180 days', async () => {
+    vi.mocked(stocksApi.getHistory)
+      .mockResolvedValueOnce(historyPayloadWithRecords(90, 1))
+      .mockResolvedValueOnce(historyPayloadWithRecords(180, 2));
+
+    render(
+      <StockKLineDrawer
+        isOpen
+        stockCode="000001.SZ"
+        stockName="平安银行"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByTestId('kline-chart')).toHaveTextContent('chart 1');
+
+    fireEvent.click(screen.getByRole('button', { name: '180 天' }));
+
+    expect(await screen.findByTestId('kline-chart')).toHaveTextContent('chart 2');
+    expect(stocksApi.getHistory).toHaveBeenCalledTimes(2);
+    expect(stocksApi.getHistory).toHaveBeenLastCalledWith(
+      '000001.SZ',
+      expect.objectContaining({ days: 180, forceRefresh: false, signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('aborts the previous request when switching ranges', async () => {
