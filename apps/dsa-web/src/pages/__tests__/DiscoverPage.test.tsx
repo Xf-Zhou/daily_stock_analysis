@@ -4,8 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DiscoverPage from '../DiscoverPage';
 import { analysisApi, DuplicateTaskError } from '../../api/analysis';
 import { stocksApi } from '../../api/stocks';
+import { systemConfigApi, SystemConfigConflictError } from '../../api/systemConfig';
 import { useStockIndex } from '../../hooks/useStockIndex';
 import type { StockIndexItem } from '../../types/stockIndex';
+import type { SystemConfigResponse, UpdateSystemConfigResponse } from '../../types/systemConfig';
 
 vi.mock('../../hooks/useStockIndex', () => ({
   useStockIndex: vi.fn(),
@@ -35,6 +37,26 @@ vi.mock('../../api/analysis', () => {
       analyzeAsync: vi.fn(),
     },
     DuplicateTaskError: MockDuplicateTaskError,
+  };
+});
+
+vi.mock('../../api/systemConfig', () => {
+  class MockSystemConfigConflictError extends Error {
+    currentConfigVersion?: string;
+
+    constructor(message: string, currentConfigVersion?: string) {
+      super(message);
+      this.name = 'SystemConfigConflictError';
+      this.currentConfigVersion = currentConfigVersion;
+    }
+  }
+
+  return {
+    systemConfigApi: {
+      getConfig: vi.fn(),
+      update: vi.fn(),
+    },
+    SystemConfigConflictError: MockSystemConfigConflictError,
   };
 });
 
@@ -134,6 +156,36 @@ const createDiscoverStock = (idx: number): StockIndexItem => {
   };
 };
 
+const createConfigResponse = (
+  stockList: string,
+  overrides: Partial<SystemConfigResponse> = {},
+): SystemConfigResponse => ({
+  configVersion: 'config-v1',
+  maskToken: 'mask-1',
+  items: [
+    {
+      key: 'STOCK_LIST',
+      value: stockList,
+      rawValueExists: true,
+      isMasked: false,
+    },
+  ],
+  ...overrides,
+});
+
+const createUpdateResponse = (
+  overrides: Partial<UpdateSystemConfigResponse> = {},
+): UpdateSystemConfigResponse => ({
+  success: true,
+  configVersion: 'config-v2',
+  appliedCount: 1,
+  skippedMaskedCount: 0,
+  reloadTriggered: true,
+  updatedKeys: ['STOCK_LIST'],
+  warnings: [],
+  ...overrides,
+});
+
 describe('DiscoverPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -154,6 +206,8 @@ describe('DiscoverPage', () => {
       taskId: 'task-1',
       status: 'pending',
     });
+    vi.mocked(systemConfigApi.getConfig).mockResolvedValue(createConfigResponse('600519,HK00700'));
+    vi.mocked(systemConfigApi.update).mockResolvedValue(createUpdateResponse());
   });
 
   it('filters by keyword and calculates industry coverage after keyword filtering', async () => {
@@ -276,6 +330,266 @@ describe('DiscoverPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '查看 腾讯控股 K线' }));
 
     expect(screen.getByTestId('kline-drawer')).toHaveTextContent('腾讯控股 00700.HK');
+  });
+
+  it('loads watchlist config and renders solid or empty stars', async () => {
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(systemConfigApi.getConfig).toHaveBeenCalledWith(false);
+    });
+    expect(await screen.findByRole('button', { name: '从自选移除 贵州茅台' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '加入自选 平安银行' })).toBeInTheDocument();
+  });
+
+  it('appends a standard watchlist code and updates the local config version after save', async () => {
+    vi.mocked(systemConfigApi.getConfig).mockResolvedValueOnce(createConfigResponse('600519,HK00700'));
+    vi.mocked(systemConfigApi.update)
+      .mockResolvedValueOnce(createUpdateResponse({ configVersion: 'config-v2' }))
+      .mockResolvedValueOnce(createUpdateResponse({ configVersion: 'config-v3' }));
+
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '加入自选 平安银行' }));
+
+    await waitFor(() => {
+      expect(systemConfigApi.update).toHaveBeenCalledWith(expect.objectContaining({
+        configVersion: 'config-v1',
+        maskToken: 'mask-1',
+        items: [{ key: 'STOCK_LIST', value: '600519,HK00700,000001' }],
+      }));
+    });
+    expect(await screen.findByRole('button', { name: '从自选移除 平安银行' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '加入自选 万科A' }));
+
+    await waitFor(() => {
+      expect(systemConfigApi.update).toHaveBeenLastCalledWith(expect.objectContaining({
+        configVersion: 'config-v2',
+        maskToken: 'mask-1',
+        items: [{ key: 'STOCK_LIST', value: '600519,HK00700,000001,000002' }],
+      }));
+    });
+    expect(systemConfigApi.getConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes all equivalent watchlist codes when unstarred', async () => {
+    vi.mocked(systemConfigApi.getConfig).mockResolvedValueOnce(createConfigResponse('600519,600519.SH,HK00700'));
+
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '从自选移除 贵州茅台' }));
+
+    await waitFor(() => {
+      expect(systemConfigApi.update).toHaveBeenCalledWith(expect.objectContaining({
+        items: [{ key: 'STOCK_LIST', value: 'HK00700' }],
+      }));
+    });
+  });
+
+  it('renders action feedback as a floating toast without taking page layout space', async () => {
+    vi.mocked(systemConfigApi.getConfig).mockResolvedValueOnce(createConfigResponse('600519,HK00700'));
+
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '从自选移除 贵州茅台' }));
+
+    const toast = await screen.findByTestId('discover-action-toast');
+    expect(toast).toHaveTextContent('已移出自选');
+    expect(toast).toHaveClass('fixed');
+  });
+
+  it('disables all star buttons while a watchlist save is running', async () => {
+    let resolveUpdate: (value: UpdateSystemConfigResponse) => void = () => {};
+    vi.mocked(systemConfigApi.getConfig).mockResolvedValueOnce(createConfigResponse('600519,HK00700'));
+    vi.mocked(systemConfigApi.update).mockReturnValue(new Promise((resolve) => {
+      resolveUpdate = resolve;
+    }));
+
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '加入自选 平安银行' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '加入自选 万科A' })).toBeDisabled();
+    });
+
+    resolveUpdate(createUpdateResponse());
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '加入自选 万科A' })).not.toBeDisabled();
+    });
+  });
+
+  it('reloads config on version conflict without silently applying the clicked change', async () => {
+    vi.mocked(systemConfigApi.getConfig)
+      .mockResolvedValueOnce(createConfigResponse('600519'))
+      .mockResolvedValueOnce(createConfigResponse('600519,000002', { configVersion: 'config-v2', maskToken: 'mask-2' }));
+    vi.mocked(systemConfigApi.update).mockRejectedValueOnce(
+      new SystemConfigConflictError('配置版本冲突', 'config-v2'),
+    );
+
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '加入自选 平安银行' }));
+
+    expect(await screen.findByText('自选配置已更新')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '加入自选 平安银行' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '从自选移除 万科A' })).toBeInTheDocument();
+  });
+
+  it('keeps the last watchlist and lets users exit watchlist-only after a conflict reload fails', async () => {
+    const largeIndex = Array.from({ length: 125 }, (_, idx) => createDiscoverStock(idx + 1));
+    vi.mocked(useStockIndex).mockReturnValue({
+      index: largeIndex,
+      loading: false,
+      error: null,
+      fallback: false,
+      loaded: true,
+    });
+    vi.mocked(systemConfigApi.getConfig)
+      .mockResolvedValueOnce(createConfigResponse('100061'))
+      .mockRejectedValueOnce(new Error('刷新失败'));
+    vi.mocked(systemConfigApi.update).mockRejectedValueOnce(
+      new SystemConfigConflictError('配置版本冲突', 'config-v2'),
+    );
+
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '只看自选' }));
+    expect(screen.getByText('显示 1-1 / 1')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '从自选移除 测试股票61' }));
+
+    expect(await screen.findByText('自选配置不可用')).toBeInTheDocument();
+    expect(screen.getByText('测试股票61')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '只看自选' })).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '只看自选' }));
+
+    expect(screen.getByText('显示 1-50 / 125')).toBeInTheDocument();
+  });
+
+  it('standardizes existing bare HK codes using the stock index on later saves', async () => {
+    vi.mocked(systemConfigApi.getConfig).mockResolvedValueOnce(createConfigResponse('00700'));
+
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '加入自选 平安银行' }));
+
+    await waitFor(() => {
+      expect(systemConfigApi.update).toHaveBeenCalledWith(expect.objectContaining({
+        items: [{ key: 'STOCK_LIST', value: 'HK00700,000001' }],
+      }));
+    });
+  });
+
+  it('keeps discovery usable but disables stars when config loading fails', async () => {
+    vi.mocked(systemConfigApi.getConfig).mockRejectedValueOnce(new Error('配置服务不可用'));
+
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('自选配置不可用')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '加入自选 平安银行' })).toBeDisabled();
+    expect(screen.getAllByRole('button', { name: /分析/ })[0]).not.toBeDisabled();
+  });
+
+  it('filters to watchlist only and resets the stock page', async () => {
+    const largeIndex = Array.from({ length: 125 }, (_, idx) => createDiscoverStock(idx + 1));
+    vi.mocked(useStockIndex).mockReturnValue({
+      index: largeIndex,
+      loading: false,
+      error: null,
+      fallback: false,
+      loaded: true,
+    });
+    vi.mocked(systemConfigApi.getConfig).mockResolvedValue(createConfigResponse('100061'));
+
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
+    expect(screen.getByText('显示 51-100 / 125')).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('button', { name: '只看自选' }));
+
+    expect(screen.getByText('显示 1-1 / 1')).toBeInTheDocument();
+    expect(screen.getByText('测试股票61')).toBeInTheDocument();
+  });
+
+  it('uses the same watchlist helper for ranking star toggles', async () => {
+    vi.mocked(stocksApi.getRankings).mockResolvedValueOnce({
+      status: 'ok',
+      source: 'mock',
+      updatedAt: '2026-06-21T00:00:00+00:00',
+      items: [
+        {
+          code: '00700.HK',
+          name: '腾讯控股',
+          market: 'HK',
+          industry: '互联网服务',
+          price: 400,
+          changePct: 3.1,
+          amount: 120000000,
+          volume: 1000000,
+        },
+      ],
+    });
+    vi.mocked(systemConfigApi.getConfig)
+      .mockResolvedValueOnce(createConfigResponse(''))
+      .mockResolvedValueOnce(createConfigResponse('HK00700', { configVersion: 'config-v2', maskToken: 'mask-2' }));
+
+    render(
+      <MemoryRouter>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '加入自选 腾讯控股' }));
+
+    await waitFor(() => {
+      expect(systemConfigApi.update).toHaveBeenCalledWith(expect.objectContaining({
+        items: [{ key: 'STOCK_LIST', value: 'HK00700' }],
+      }));
+    });
   });
 
   it('paginates the discoverable stock list with compact page sizes', async () => {

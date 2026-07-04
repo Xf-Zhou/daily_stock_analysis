@@ -5,14 +5,17 @@ import {
   BarChart3,
   ChartCandlestick,
   LineChart,
+  Loader2,
   MessageSquareQuote,
   Play,
   Search,
+  Star,
   TrendingDown,
   TrendingUp,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { analysisApi, DuplicateTaskError } from '../api/analysis';
+import { systemConfigApi, SystemConfigConflictError } from '../api/systemConfig';
 import {
   stocksApi,
   type RankingDirection,
@@ -26,6 +29,14 @@ import { useStockIndex } from '../hooks/useStockIndex';
 import type { Market } from '../types/stockIndex';
 import { searchStocks } from '../utils/searchStocks';
 import { cn } from '../utils/cn';
+import {
+  addWatchlistCode,
+  formatStockListValue,
+  isSameStockCode,
+  parseStockListValue,
+  removeWatchlistCode,
+  type WatchlistMarketResolver,
+} from '../utils/watchlist';
 
 const UNCATEGORIZED_INDUSTRY = '__uncategorized__';
 const STOCK_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
@@ -113,8 +124,61 @@ const DiscoverPage: React.FC = () => {
   const [stockPage, setStockPage] = useState(1);
   const [stockPageSize, setStockPageSize] = useState(DEFAULT_STOCK_PAGE_SIZE);
   const [kLineStock, setKLineStock] = useState<{ code: string; name: string } | null>(null);
+  const [watchlistCodes, setWatchlistCodes] = useState<string[]>([]);
+  const [watchlistConfigVersion, setWatchlistConfigVersion] = useState('');
+  const [watchlistMaskToken, setWatchlistMaskToken] = useState('');
+  const [watchlistLoading, setWatchlistLoading] = useState(true);
+  const [watchlistError, setWatchlistError] = useState<string | null>(null);
+  const [watchlistSavingCode, setWatchlistSavingCode] = useState<string | null>(null);
+  const [watchlistOnly, setWatchlistOnly] = useState(false);
 
   const activeRanking = RANKING_TABS.find((tab) => tab.key === rankingKey) ?? RANKING_TABS[0];
+  const watchlistSaving = Boolean(watchlistSavingCode);
+  const watchlistDisabled = watchlistLoading || watchlistSaving || Boolean(watchlistError) || !watchlistConfigVersion;
+  const watchlistFilterDisabled = watchlistLoading || watchlistSaving || (!watchlistConfigVersion && !watchlistOnly);
+
+  const loadWatchlistConfig = useCallback(async () => {
+    setWatchlistLoading(true);
+    try {
+      const payload = await systemConfigApi.getConfig(false);
+      const stockList = payload.items.find((item) => item.key === 'STOCK_LIST')?.value ?? '';
+      setWatchlistCodes(parseStockListValue(stockList));
+      setWatchlistConfigVersion(payload.configVersion);
+      setWatchlistMaskToken(payload.maskToken);
+      setWatchlistError(null);
+      return payload;
+    } catch (requestError) {
+      const message = getErrorMessage(requestError, '无法加载自选股配置');
+      setWatchlistError(message);
+      return null;
+    } finally {
+      setWatchlistLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadWatchlistConfig();
+  }, [loadWatchlistConfig]);
+
+  const isStockWatchlisted = useCallback((stockCode: string, stockMarket?: Market | null) => (
+    watchlistCodes.some((code) => isSameStockCode(code, stockCode, stockMarket))
+  ), [watchlistCodes]);
+
+  const resolveWatchlistCodeMarket = useCallback<WatchlistMarketResolver>((stockCode) => {
+    const trimmed = stockCode.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const matched = index.find((item) => (
+      item.active
+      && item.assetType === 'stock'
+      && (
+        isSameStockCode(trimmed, item.canonicalCode, item.market)
+        || isSameStockCode(trimmed, item.displayCode, item.market)
+      )
+    ));
+    return matched?.market;
+  }, [index]);
 
   const marketStocks = useMemo(
     () => index.filter((item) => item.active && item.assetType === 'stock' && item.market === market),
@@ -156,18 +220,86 @@ const DiscoverPage: React.FC = () => {
   }, [industry, industryOptions]);
 
   const filteredStocks = useMemo(() => {
-    if (industry === UNCATEGORIZED_INDUSTRY) {
-      return keywordFilteredStocks.filter((item) => !item.industry);
+    const industryFiltered = (() => {
+      if (industry === UNCATEGORIZED_INDUSTRY) {
+        return keywordFilteredStocks.filter((item) => !item.industry);
+      }
+      if (industry) {
+        return keywordFilteredStocks.filter((item) => item.industry === industry);
+      }
+      return keywordFilteredStocks;
+    })();
+
+    if (watchlistOnly) {
+      return industryFiltered.filter((item) => isStockWatchlisted(item.canonicalCode, item.market));
     }
-    if (industry) {
-      return keywordFilteredStocks.filter((item) => item.industry === industry);
-    }
-    return keywordFilteredStocks;
-  }, [industry, keywordFilteredStocks]);
+    return industryFiltered;
+  }, [industry, isStockWatchlisted, keywordFilteredStocks, watchlistOnly]);
 
   useEffect(() => {
     setStockPage(1);
-  }, [industry, keyword, market]);
+  }, [industry, keyword, market, watchlistOnly]);
+
+  const handleToggleWatchlist = useCallback(async (stockCode: string, stockName: string, stockMarket?: Market | null) => {
+    if (watchlistDisabled || watchlistSavingCode) {
+      return;
+    }
+    const isStarred = isStockWatchlisted(stockCode, stockMarket);
+    const nextCodes = isStarred
+      ? removeWatchlistCode(watchlistCodes, stockCode, stockMarket, resolveWatchlistCodeMarket)
+      : addWatchlistCode(watchlistCodes, stockCode, stockMarket, resolveWatchlistCodeMarket);
+    const nextValue = formatStockListValue(nextCodes);
+
+    setWatchlistSavingCode(stockCode);
+    setActionNotice(null);
+    try {
+      const result = await systemConfigApi.update({
+        configVersion: watchlistConfigVersion,
+        maskToken: watchlistMaskToken,
+        reloadNow: true,
+        items: [{ key: 'STOCK_LIST', value: nextValue }],
+      });
+      setWatchlistCodes(nextCodes);
+      if (result.configVersion) {
+        setWatchlistConfigVersion(result.configVersion);
+      }
+      setActionNotice({
+        variant: 'success',
+        title: isStarred ? '已移出自选' : '已加入自选',
+        message: isStarred ? `${stockName} 已从 STOCK_LIST 移除` : `${stockName} 已追加到 STOCK_LIST`,
+      });
+    } catch (requestError) {
+      if (requestError instanceof SystemConfigConflictError) {
+        await loadWatchlistConfig();
+        setActionNotice({
+          variant: 'warning',
+          title: '自选配置已更新',
+          message: '配置已被其他操作更新，请重试本次自选操作。',
+        });
+      } else {
+        setActionNotice({
+          variant: 'danger',
+          title: '自选保存失败',
+          message: getErrorMessage(requestError, '暂时无法保存自选股'),
+        });
+      }
+    } finally {
+      setWatchlistSavingCode(null);
+    }
+  }, [
+    isStockWatchlisted,
+    loadWatchlistConfig,
+    resolveWatchlistCodeMarket,
+    watchlistCodes,
+    watchlistConfigVersion,
+    watchlistDisabled,
+    watchlistMaskToken,
+    watchlistSavingCode,
+  ]);
+
+  const isWatchlistButtonSaving = useCallback((stockCode: string, stockMarket?: Market | null) => (
+    watchlistSavingCode ? isSameStockCode(watchlistSavingCode, stockCode, stockMarket) : false
+  ), [watchlistSavingCode]);
 
   const coverage = useMemo(() => {
     const denominator = keywordFilteredStocks.length;
@@ -292,6 +424,23 @@ const DiscoverPage: React.FC = () => {
               <h1 className="text-2xl font-semibold tracking-tight text-foreground">股票发现</h1>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                aria-pressed={watchlistOnly}
+                aria-label="只看自选"
+                disabled={watchlistFilterDisabled}
+                onClick={() => setWatchlistOnly((value) => !value)}
+                className={cn(
+                  'inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all',
+                  watchlistOnly
+                    ? 'border-warning/35 bg-warning/12 text-warning'
+                    : 'border-border/60 bg-elevated/45 text-secondary-text hover:bg-hover hover:text-foreground',
+                  watchlistFilterDisabled ? 'cursor-not-allowed opacity-50' : ''
+                )}
+              >
+                <Star className="h-3.5 w-3.5" fill={watchlistOnly ? 'currentColor' : 'none'} />
+                只看自选
+              </button>
               <Badge variant="info">{MARKET_OPTIONS.find((option) => option.value === market)?.label}</Badge>
               <Badge variant={coverage.percent >= 60 ? 'success' : coverage.percent > 0 ? 'warning' : 'default'}>
                 行业覆盖 {coverage.numerator}/{coverage.denominator}
@@ -338,13 +487,15 @@ const DiscoverPage: React.FC = () => {
         />
       ) : null}
 
-      {actionNotice ? (
+      {watchlistError ? (
         <InlineAlert
-          variant={actionNotice.variant}
-          title={actionNotice.title}
-          message={actionNotice.message}
+          variant="warning"
+          title="自选配置不可用"
+          message={`${watchlistError}。发现页仍可浏览、分析、问股和查看 K 线。`}
         />
       ) : null}
+
+      <FloatingActionToast notice={actionNotice} />
 
       <section className="glass-panel-lg px-4 py-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -393,6 +544,10 @@ const DiscoverPage: React.FC = () => {
                 onAnalyze={handleAnalyze}
                 onAsk={handleAsk}
                 onOpenKLine={handleOpenKLine}
+                onToggleWatchlist={handleToggleWatchlist}
+                isWatchlisted={isStockWatchlisted(item.code, item.market)}
+                watchlistDisabled={watchlistDisabled}
+                watchlistSaving={isWatchlistButtonSaving(item.code, item.market)}
                 analyzingCode={analyzingCode}
               />
             ))
@@ -444,7 +599,7 @@ const DiscoverPage: React.FC = () => {
                     <th className="px-3 py-2 font-medium">名称</th>
                     <th className="px-3 py-2 font-medium">市场</th>
                     <th className="px-3 py-2 font-medium">行业</th>
-                    <th className="w-[250px] px-3 py-2 text-right font-medium">操作</th>
+                    <th className="w-[292px] px-3 py-2 text-right font-medium">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/45">
@@ -465,6 +620,13 @@ const DiscoverPage: React.FC = () => {
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex justify-end gap-1.5">
+                          <WatchlistStarButton
+                            stockName={item.nameZh}
+                            isStarred={isStockWatchlisted(item.canonicalCode, item.market)}
+                            disabled={watchlistDisabled}
+                            isSaving={isWatchlistButtonSaving(item.canonicalCode, item.market)}
+                            onClick={() => void handleToggleWatchlist(item.canonicalCode, item.nameZh, item.market)}
+                          />
                           <Tooltip content="查看 K 线">
                             <Button
                               size="sm"
@@ -539,6 +701,89 @@ const CompactMetric: React.FC<CompactMetricProps> = ({ label, value }) => (
   </div>
 );
 
+type FloatingActionToastProps = {
+  notice: ActionNotice;
+};
+
+const TOAST_VARIANT_STYLES: Record<NonNullable<ActionNotice>['variant'], string> = {
+  success: 'border-success/30 bg-success/12 text-success shadow-success/10',
+  warning: 'border-warning/35 bg-warning/12 text-warning shadow-warning/10',
+  danger: 'border-danger/35 bg-danger/12 text-danger shadow-danger/10',
+};
+
+const FloatingActionToast: React.FC<FloatingActionToastProps> = ({ notice }) => {
+  if (!notice) {
+    return null;
+  }
+
+  return (
+    <div
+      data-testid="discover-action-toast"
+      role="status"
+      aria-live="polite"
+      className="pointer-events-none fixed left-1/2 top-5 z-[95] w-[min(calc(100vw-2rem),34rem)] -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0"
+    >
+      <div
+        className={cn(
+          'rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-xl',
+          TOAST_VARIANT_STYLES[notice.variant],
+        )}
+      >
+        <div className="text-sm font-semibold leading-5">{notice.title}</div>
+        <div className="mt-1 text-sm leading-5 opacity-90">{notice.message}</div>
+      </div>
+    </div>
+  );
+};
+
+type WatchlistStarButtonProps = {
+  stockName: string;
+  isStarred: boolean;
+  disabled: boolean;
+  isSaving: boolean;
+  size?: 'sm' | 'xsm';
+  onClick: () => void;
+};
+
+const WatchlistStarButton: React.FC<WatchlistStarButtonProps> = ({
+  stockName,
+  isStarred,
+  disabled,
+  isSaving,
+  size = 'sm',
+  onClick,
+}) => {
+  const label = isStarred ? `从自选移除 ${stockName}` : `加入自选 ${stockName}`;
+  const iconSize = size === 'sm' ? 'h-4 w-4' : 'h-3.5 w-3.5';
+  const buttonSize = size === 'sm' ? 'h-9 w-9 rounded-lg' : 'h-6 w-6 rounded-lg';
+
+  return (
+    <Tooltip content={isStarred ? '移出自选' : '加入自选'}>
+      <button
+        type="button"
+        aria-label={label}
+        disabled={disabled}
+        onClick={onClick}
+        className={cn(
+          'inline-flex shrink-0 items-center justify-center border transition-all',
+          'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan/15',
+          'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
+          buttonSize,
+          isStarred
+            ? 'border-warning/30 bg-warning/12 text-warning hover:bg-warning/18'
+            : 'border-transparent bg-transparent text-secondary-text hover:bg-hover hover:text-foreground'
+        )}
+      >
+        {isSaving ? (
+          <Loader2 className={cn(iconSize, 'animate-spin')} />
+        ) : (
+          <Star className={iconSize} fill={isStarred ? 'currentColor' : 'none'} />
+        )}
+      </button>
+    </Tooltip>
+  );
+};
+
 type RankingTileProps = {
   item: StockRankingItem;
   rank: number;
@@ -546,6 +791,10 @@ type RankingTileProps = {
   onAnalyze: (stockCode: string, stockName: string) => Promise<void>;
   onAsk: (stockCode: string, stockName: string) => void;
   onOpenKLine: (stockCode: string, stockName: string) => void;
+  onToggleWatchlist: (stockCode: string, stockName: string, stockMarket: Market) => Promise<void>;
+  isWatchlisted: boolean;
+  watchlistDisabled: boolean;
+  watchlistSaving: boolean;
 };
 
 const RankingTile: React.FC<RankingTileProps> = ({
@@ -555,6 +804,10 @@ const RankingTile: React.FC<RankingTileProps> = ({
   onAnalyze,
   onAsk,
   onOpenKLine,
+  onToggleWatchlist,
+  isWatchlisted,
+  watchlistDisabled,
+  watchlistSaving,
 }) => (
   <div className="rounded-lg border border-border/55 bg-elevated/35 p-4 transition-colors hover:bg-hover/60">
     <div className="flex items-start justify-between gap-3">
@@ -579,6 +832,14 @@ const RankingTile: React.FC<RankingTileProps> = ({
     <div className="mt-3 flex items-center justify-between gap-2">
       <Badge variant={item.industry ? 'info' : 'default'}>{item.industry || '未分类'}</Badge>
       <div className="flex gap-1.5">
+        <WatchlistStarButton
+          stockName={item.name}
+          isStarred={isWatchlisted}
+          disabled={watchlistDisabled}
+          isSaving={watchlistSaving}
+          size="xsm"
+          onClick={() => void onToggleWatchlist(item.code, item.name, item.market)}
+        />
         <Tooltip content="查看 K 线">
           <Button
             size="xsm"
