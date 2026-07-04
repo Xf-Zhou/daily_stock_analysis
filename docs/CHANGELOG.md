@@ -69,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] Web 股票发现页 K 线抽屉新增缓存状态、刷新、MA5/MA10/MA20、成交量开关和十字光标 OHLC 信息栏。
 - [测试] 增加股票历史缓存快照、stale fallback、K 线刷新状态、均线和 crosshair 清理测试。
 - [修复] 修正 K 线图重复日期归一化、无 ResizeObserver 时 crosshair 订阅清理和缺失涨跌幅展示。
+- [修复] 固定 K 线图十字光标信息条高度，避免悬浮时行情信息换行导致图表整体下移。
 
 ## [3.16.0] - 2026-05-10
 

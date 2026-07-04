@@ -21,6 +21,7 @@ const MA_COLORS = {
   ma10: '#f59e0b',
   ma20: '#8b5cf6',
 };
+const HOVER_INFO_ITEM_CLASS = 'shrink-0';
 
 type StockKLineChartProps = {
   data: KLineData[];
@@ -222,7 +223,7 @@ export const StockKLineChart: React.FC<StockKLineChartProps> = ({ data, classNam
 
   return (
     <div className={cn('rounded-xl border border-border/50 bg-card/55 p-3', className)}>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <div className="mb-3 flex flex-col gap-2">
         <div className="flex flex-wrap gap-2">
           {(['ma5', 'ma10', 'ma20'] as const).map((key) => (
             <button
@@ -254,23 +255,26 @@ export const StockKLineChart: React.FC<StockKLineChartProps> = ({ data, classNam
             成交量
           </button>
         </div>
-        <div className="flex min-h-7 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-secondary-text">
+        <div
+          data-testid="stock-kline-hover-info"
+          className="flex h-8 min-h-8 w-full min-w-0 items-center gap-3 overflow-x-auto overflow-y-hidden whitespace-nowrap rounded-lg border border-border/40 bg-base/25 px-2 text-xs text-secondary-text"
+        >
           {visibleHoverPoint ? (
             <>
-              <span className="font-medium text-foreground">{visibleHoverPoint.time}</span>
-              <span>开 {formatNumber(visibleHoverPoint.open)}</span>
-              <span>高 {formatNumber(visibleHoverPoint.high)}</span>
-              <span>低 {formatNumber(visibleHoverPoint.low)}</span>
-              <span>收 {formatNumber(visibleHoverPoint.close)}</span>
-              <span>涨跌幅 {formatPercent(visibleHoverPoint.changePercent)}</span>
-              <span>量 {formatLargeNumber(visibleHoverPoint.volume)}</span>
-              <span>额 {formatLargeNumber(visibleHoverPoint.amount)}</span>
-              {visibleHoverPoint.ma5 !== undefined ? <span>MA5 {formatNumber(visibleHoverPoint.ma5)}</span> : null}
-              {visibleHoverPoint.ma10 !== undefined ? <span>MA10 {formatNumber(visibleHoverPoint.ma10)}</span> : null}
-              {visibleHoverPoint.ma20 !== undefined ? <span>MA20 {formatNumber(visibleHoverPoint.ma20)}</span> : null}
+              <span className="shrink-0 font-medium text-foreground">{visibleHoverPoint.time}</span>
+              <span className={HOVER_INFO_ITEM_CLASS}>开 {formatNumber(visibleHoverPoint.open)}</span>
+              <span className={HOVER_INFO_ITEM_CLASS}>高 {formatNumber(visibleHoverPoint.high)}</span>
+              <span className={HOVER_INFO_ITEM_CLASS}>低 {formatNumber(visibleHoverPoint.low)}</span>
+              <span className={HOVER_INFO_ITEM_CLASS}>收 {formatNumber(visibleHoverPoint.close)}</span>
+              <span className={HOVER_INFO_ITEM_CLASS}>涨跌幅 {formatPercent(visibleHoverPoint.changePercent)}</span>
+              <span className={HOVER_INFO_ITEM_CLASS}>量 {formatLargeNumber(visibleHoverPoint.volume)}</span>
+              <span className={HOVER_INFO_ITEM_CLASS}>额 {formatLargeNumber(visibleHoverPoint.amount)}</span>
+              {visibleHoverPoint.ma5 !== undefined ? <span className={HOVER_INFO_ITEM_CLASS}>MA5 {formatNumber(visibleHoverPoint.ma5)}</span> : null}
+              {visibleHoverPoint.ma10 !== undefined ? <span className={HOVER_INFO_ITEM_CLASS}>MA10 {formatNumber(visibleHoverPoint.ma10)}</span> : null}
+              {visibleHoverPoint.ma20 !== undefined ? <span className={HOVER_INFO_ITEM_CLASS}>MA20 {formatNumber(visibleHoverPoint.ma20)}</span> : null}
             </>
           ) : (
-            <span>悬停查看 OHLC</span>
+            <span className={HOVER_INFO_ITEM_CLASS}>悬停查看 OHLC</span>
           )}
         </div>
       </div>

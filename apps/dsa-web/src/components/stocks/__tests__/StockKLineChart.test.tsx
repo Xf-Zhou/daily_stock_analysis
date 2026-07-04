@@ -250,6 +250,44 @@ describe('StockKLineChart', () => {
     expect(screen.getByText('涨跌幅 -')).toBeInTheDocument();
   });
 
+  it('keeps the crosshair info strip at a fixed height so the chart does not shift on hover', () => {
+    render(
+      <StockKLineChart
+        data={[
+          {
+            date: '2026-06-01',
+            open: 1,
+            high: 2,
+            low: 0.5,
+            close: 1.5,
+            volume: 10,
+            amount: 100,
+            changePercent: 2.5,
+          },
+        ]}
+      />,
+    );
+
+    const infoStrip = screen.getByTestId('stock-kline-hover-info');
+    expect(infoStrip).toHaveClass('h-8', 'overflow-x-auto', 'overflow-y-hidden', 'whitespace-nowrap');
+
+    act(() => {
+      crosshairHandler?.({
+        time: '2026-06-01',
+        seriesData: new Map([
+          [candleSeries, { open: 1, high: 2, low: 0.5, close: 1.5 }],
+        ]),
+      });
+    });
+
+    expect(screen.getByTestId('stock-kline-hover-info')).toHaveClass(
+      'h-8',
+      'overflow-x-auto',
+      'overflow-y-hidden',
+      'whitespace-nowrap',
+    );
+  });
+
   it('cleans up crosshair subscription when ResizeObserver is unavailable', () => {
     vi.stubGlobal('ResizeObserver', undefined);
     const addEventListener = vi.spyOn(window, 'addEventListener');
