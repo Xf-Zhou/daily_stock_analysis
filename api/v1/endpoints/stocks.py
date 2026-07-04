@@ -371,7 +371,8 @@ def get_stock_quote(stock_code: str) -> StockQuote:
 def get_stock_history(
     stock_code: str,
     period: str = Query("daily", description="K 线周期", pattern="^(daily|weekly|monthly)$"),
-    days: int = Query(30, ge=1, le=365, description="获取天数")
+    days: int = Query(30, ge=1, le=365, description="获取天数"),
+    force_refresh: bool = Query(False, description="是否跳过新鲜缓存并尝试刷新外部行情源")
 ) -> StockHistoryResponse:
     """
     获取股票历史行情
@@ -382,6 +383,7 @@ def get_stock_history(
         stock_code: 股票代码
         period: K 线周期 (daily/weekly/monthly)
         days: 获取天数
+        force_refresh: 是否跳过新鲜缓存
         
     Returns:
         StockHistoryResponse: 历史行情数据
@@ -393,7 +395,8 @@ def get_stock_history(
         result = service.get_history_data(
             stock_code=stock_code,
             period=period,
-            days=days
+            days=days,
+            force_refresh=force_refresh,
         )
         
         # 转换为响应模型
@@ -412,10 +415,19 @@ def get_stock_history(
         ]
         
         return StockHistoryResponse(
-            stock_code=stock_code,
+            stock_code=result.get("stock_code") or stock_code,
             stock_name=result.get("stock_name"),
-            period=period,
-            data=data
+            period=result.get("period") or period,
+            source=result.get("source"),
+            cache_hit=result.get("cache_hit"),
+            stale=result.get("stale"),
+            partial_cache=result.get("partial_cache"),
+            as_of_date=result.get("as_of_date"),
+            actual_records=result.get("actual_records"),
+            requested_days=result.get("requested_days"),
+            effective_days=result.get("effective_days"),
+            message=result.get("message"),
+            data=data,
         )
     
     except ValueError as e:

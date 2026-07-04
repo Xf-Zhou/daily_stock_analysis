@@ -123,6 +123,15 @@ class StockHistoryResponse(BaseModel):
     stock_code: str = Field(..., description="股票代码")
     stock_name: Optional[str] = Field(None, description="股票名称")
     period: str = Field(..., description="K 线周期")
+    source: Optional[str] = Field(None, description="数据来源，db_cache 表示本地缓存")
+    cache_hit: Optional[bool] = Field(None, description="是否命中本地缓存")
+    stale: Optional[bool] = Field(None, description="是否为旧缓存降级数据")
+    partial_cache: Optional[bool] = Field(None, description="缓存记录是否少于请求天数")
+    as_of_date: Optional[str] = Field(None, description="数据截至日期")
+    actual_records: Optional[int] = Field(None, description="实际返回记录数")
+    requested_days: Optional[int] = Field(None, description="请求天数")
+    effective_days: Optional[int] = Field(None, description="实际使用的天数")
+    message: Optional[str] = Field(None, description="状态说明")
     data: List[KLineData] = Field(default_factory=list, description="K 线数据列表")
     
     class Config:
@@ -131,6 +140,11 @@ class StockHistoryResponse(BaseModel):
                 "stock_code": "600519",
                 "stock_name": "贵州茅台",
                 "period": "daily",
+                "source": "db_cache",
+                "cache_hit": True,
+                "stale": False,
+                "as_of_date": "2024-01-01",
+                "actual_records": 30,
                 "data": []
             }
         }

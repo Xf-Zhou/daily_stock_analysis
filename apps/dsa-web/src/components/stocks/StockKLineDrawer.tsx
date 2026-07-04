@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { ChartCandlestick, RefreshCw } from 'lucide-react';
-import { stocksApi, type KLineData, type StockHistoryDays } from '../../api/stocks';
+import { stocksApi, type KLineData, type StockHistoryDays, type StockHistoryResponse } from '../../api/stocks';
 import { Badge, Drawer, EmptyState, InlineAlert } from '../common';
 import { StockKLineChart } from './StockKLineChart';
 import { cn } from '../../utils/cn';
@@ -18,6 +18,7 @@ type StockKLineDrawerProps = {
 
 type KLineRequestState = {
   data: KLineData[];
+  payload: StockHistoryResponse | null;
   loading: boolean;
   error: string | null;
   requestKey: string | null;
@@ -25,12 +26,13 @@ type KLineRequestState = {
 
 type KLineRequestAction =
   | { type: 'loading'; requestKey: string }
-  | { type: 'success'; requestKey: string; data: KLineData[] }
+  | { type: 'success'; requestKey: string; payload: StockHistoryResponse }
   | { type: 'error'; requestKey: string; message: string }
   | { type: 'reset' };
 
 const INITIAL_KLINE_REQUEST_STATE: KLineRequestState = {
   data: [],
+  payload: null,
   loading: false,
   error: null,
   requestKey: null,
@@ -44,11 +46,17 @@ const kLineRequestReducer = (
 ): KLineRequestState => {
   switch (action.type) {
     case 'loading':
-      return { data: [], loading: true, error: null, requestKey: action.requestKey };
+      return { data: [], payload: null, loading: true, error: null, requestKey: action.requestKey };
     case 'success':
-      return { data: action.data, loading: false, error: null, requestKey: action.requestKey };
+      return {
+        data: action.payload.data ?? [],
+        payload: action.payload,
+        loading: false,
+        error: null,
+        requestKey: action.requestKey,
+      };
     case 'error':
-      return { data: [], loading: false, error: action.message, requestKey: action.requestKey };
+      return { data: [], payload: null, loading: false, error: action.message, requestKey: action.requestKey };
     case 'reset':
       return INITIAL_KLINE_REQUEST_STATE;
     default:
@@ -78,12 +86,13 @@ export const StockKLineDrawer: React.FC<StockKLineDrawerProps> = ({
   onClose,
 }) => {
   const [days, setDays] = useState<StockHistoryDays>(DEFAULT_DAYS);
-  const [{ data, loading, error, requestKey }, dispatch] = useReducer(
+  const [{ data, payload, loading, error, requestKey }, dispatch] = useReducer(
     kLineRequestReducer,
     INITIAL_KLINE_REQUEST_STATE,
   );
   const requestIdRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const responseCacheRef = useRef(new Map<string, StockHistoryResponse>());
 
   const cancelPendingRequest = useCallback(() => {
     requestIdRef.current += 1;
@@ -97,25 +106,34 @@ export const StockKLineDrawer: React.FC<StockKLineDrawerProps> = ({
     onClose();
   }, [cancelPendingRequest, onClose]);
 
-  useEffect(() => {
+  const loadHistory = useCallback((forceRefresh = false) => {
     if (!isOpen || !stockCode) {
       cancelPendingRequest();
-      return undefined;
+      return;
     }
 
     abortControllerRef.current?.abort();
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     const nextRequestKey = buildRequestKey(stockCode, days);
 
+    if (!forceRefresh) {
+      const cachedPayload = responseCacheRef.current.get(nextRequestKey);
+      if (cachedPayload) {
+        dispatch({ type: 'success', requestKey: nextRequestKey, payload: cachedPayload });
+        return;
+      }
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     dispatch({ type: 'loading', requestKey: nextRequestKey });
 
-    stocksApi.getHistory(stockCode, { days, signal: controller.signal })
+    stocksApi.getHistory(stockCode, { days, forceRefresh, signal: controller.signal })
       .then((payload) => {
         if (controller.signal.aborted || requestId !== requestIdRef.current) return;
-        dispatch({ type: 'success', requestKey: nextRequestKey, data: payload.data ?? [] });
+        responseCacheRef.current.set(nextRequestKey, payload);
+        dispatch({ type: 'success', requestKey: nextRequestKey, payload });
       })
       .catch((requestError: unknown) => {
         if (isAbortError(requestError, controller.signal) || requestId !== requestIdRef.current) return;
@@ -125,18 +143,35 @@ export const StockKLineDrawer: React.FC<StockKLineDrawerProps> = ({
           message: getErrorMessage(requestError, '暂时无法加载 K 线数据'),
         });
       });
+  }, [cancelPendingRequest, days, isOpen, stockCode]);
+
+  useEffect(() => {
+    if (!isOpen || !stockCode) {
+      cancelPendingRequest();
+      return undefined;
+    }
+
+    loadHistory(false);
 
     return () => {
-      controller.abort();
+      abortControllerRef.current?.abort();
     };
-  }, [cancelPendingRequest, days, isOpen, stockCode]);
+  }, [cancelPendingRequest, loadHistory, days, isOpen, stockCode]);
 
   const title = stockName ? `${stockName} K线` : stockCode ? `${stockCode} K线` : 'K线';
   const currentRequestKey = isOpen && stockCode ? buildRequestKey(stockCode, days) : null;
   const isCurrentRequest = currentRequestKey !== null && requestKey === currentRequestKey;
   const visibleData = isCurrentRequest ? data : [];
+  const visiblePayload = isCurrentRequest ? payload : null;
   const visibleError = isCurrentRequest ? error : null;
   const visibleLoading = Boolean(currentRequestKey) && (!isCurrentRequest || loading);
+  const statusLabel = visiblePayload?.stale
+    ? '旧缓存'
+    : visiblePayload?.cacheHit
+      ? '缓存'
+      : visiblePayload
+        ? '实时'
+        : null;
 
   return (
     <Drawer
@@ -157,24 +192,52 @@ export const StockKLineDrawer: React.FC<StockKLineDrawerProps> = ({
               {stockName || stockCode || '未选择股票'}
             </div>
           </div>
-          <div className="flex flex-wrap gap-2" aria-label="K线范围">
-            {DAY_OPTIONS.map((option) => (
+          <div className="flex flex-col items-start gap-2 sm:items-end">
+            <div className="flex flex-wrap justify-start gap-2 sm:justify-end" aria-label="K线范围">
+              {DAY_OPTIONS.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setDays(option)}
+                  className={cn(
+                    'inline-flex h-8 items-center rounded-lg border px-3 text-sm font-medium transition-colors',
+                    days === option
+                      ? 'border-cyan/35 bg-cyan/12 text-cyan'
+                      : 'border-border/60 bg-card/70 text-secondary-text hover:bg-hover hover:text-foreground',
+                  )}
+                >
+                  {option} 天
+                </button>
+              ))}
               <button
-                key={option}
                 type="button"
-                onClick={() => setDays(option)}
-                className={cn(
-                  'inline-flex h-8 items-center rounded-lg border px-3 text-sm font-medium transition-colors',
-                  days === option
-                    ? 'border-cyan/35 bg-cyan/12 text-cyan'
-                    : 'border-border/60 bg-card/70 text-secondary-text hover:bg-hover hover:text-foreground',
-                )}
+                aria-label="刷新 K 线"
+                onClick={() => loadHistory(true)}
+                disabled={visibleLoading}
+                className="inline-flex h-8 items-center gap-1 rounded-lg border border-border/60 bg-card/70 px-3 text-sm font-medium text-secondary-text transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {option} 天
+                <RefreshCw className={cn('h-3.5 w-3.5', visibleLoading && 'animate-spin')} />
+                刷新
               </button>
-            ))}
+            </div>
+            {visiblePayload ? (
+              <div className="flex flex-wrap justify-start gap-2 text-xs text-secondary-text sm:justify-end">
+                {statusLabel ? <Badge variant={visiblePayload.stale ? 'warning' : 'info'}>{statusLabel}</Badge> : null}
+                {visiblePayload.source ? <span>来源 {visiblePayload.source}</span> : null}
+                {visiblePayload.asOfDate ? <span>截至 {visiblePayload.asOfDate}</span> : null}
+                {typeof visiblePayload.actualRecords === 'number' ? <span>{visiblePayload.actualRecords} 条</span> : null}
+              </div>
+            ) : null}
           </div>
         </div>
+
+        {visiblePayload?.stale && visiblePayload.message ? (
+          <InlineAlert
+            variant="warning"
+            title="正在展示旧缓存"
+            message={visiblePayload.message}
+          />
+        ) : null}
 
         {visibleError ? (
           <InlineAlert

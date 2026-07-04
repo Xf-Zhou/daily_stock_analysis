@@ -10,10 +10,13 @@
 """
 
 import logging
-from datetime import datetime, timedelta
+import math
+from datetime import date, datetime
 from typing import Optional, Dict, Any, List
 
 from src.repositories.stock_repo import StockRepository
+from src.data.stock_index_loader import get_index_stock_name
+from src.services.history_loader import load_history_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +92,8 @@ class StockService:
         self,
         stock_code: str,
         period: str = "daily",
-        days: int = 30
+        days: int = 30,
+        force_refresh: bool = False,
     ) -> Dict[str, Any]:
         """
         获取股票历史行情
@@ -98,6 +102,7 @@ class StockService:
             stock_code: 股票代码
             period: K 线周期 (daily/weekly/monthly)
             days: 获取天数
+            force_refresh: 是否跳过新鲜缓存并尝试刷新外部源
             
         Returns:
             历史行情数据字典
@@ -113,43 +118,27 @@ class StockService:
             )
         
         try:
-            # 调用数据获取器获取历史数据
-            from data_provider.base import DataFetcherManager
-            
-            manager = DataFetcherManager()
-            df, source = manager.get_daily_data(stock_code, days=days)
-            
-            if df is None or df.empty:
-                logger.warning(f"获取 {stock_code} 历史数据失败")
-                return {"stock_code": stock_code, "period": period, "data": []}
-            
-            # 获取股票名称
-            stock_name = manager.get_stock_name(stock_code)
-            
-            # 转换为响应格式
-            data = []
-            for _, row in df.iterrows():
-                date_val = row.get("date")
-                if hasattr(date_val, "strftime"):
-                    date_str = date_val.strftime("%Y-%m-%d")
-                else:
-                    date_str = str(date_val)
-                
-                data.append({
-                    "date": date_str,
-                    "open": float(row.get("open", 0)),
-                    "high": float(row.get("high", 0)),
-                    "low": float(row.get("low", 0)),
-                    "close": float(row.get("close", 0)),
-                    "volume": float(row.get("volume", 0)) if row.get("volume") else None,
-                    "amount": float(row.get("amount", 0)) if row.get("amount") else None,
-                    "change_percent": float(row.get("pct_chg", 0)) if row.get("pct_chg") else None,
-                })
-            
+            snapshot = load_history_snapshot(
+                stock_code=stock_code,
+                days=days,
+                force_refresh=force_refresh,
+            )
+            stock_name = get_index_stock_name(stock_code)
+            data = self._serialize_history_rows(snapshot.df, snapshot.effective_days)
+
             return {
                 "stock_code": stock_code,
                 "stock_name": stock_name,
                 "period": period,
+                "source": snapshot.source,
+                "cache_hit": snapshot.cache_hit,
+                "stale": snapshot.stale,
+                "partial_cache": snapshot.cache_hit and 0 < len(data) < snapshot.effective_days,
+                "as_of_date": data[-1]["date"] if data else snapshot.as_of_date,
+                "actual_records": len(data),
+                "requested_days": snapshot.requested_days,
+                "effective_days": snapshot.effective_days,
+                "message": snapshot.message,
                 "data": data,
             }
             
@@ -159,6 +148,75 @@ class StockService:
         except Exception as e:
             logger.error(f"获取历史数据失败: {e}", exc_info=True)
             return {"stock_code": stock_code, "period": period, "data": []}
+
+    @staticmethod
+    def _finite_float(value: Any) -> Optional[float]:
+        if value is None or value == "":
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if math.isfinite(parsed) else None
+
+    @staticmethod
+    def _date_str(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        try:
+            if value != value:  # NaN / NaT
+                return None
+        except Exception:
+            return None
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        if hasattr(value, "strftime"):
+            try:
+                return value.strftime("%Y-%m-%d")
+            except Exception:
+                return None
+        text = str(value).strip()
+        if not text or text.lower() in {"nat", "nan", "none"}:
+            return None
+        return text[:10]
+
+    @classmethod
+    def _serialize_history_rows(cls, df: Any, effective_days: int) -> List[Dict[str, Any]]:
+        if df is None or getattr(df, "empty", True):
+            return []
+
+        rows: List[Dict[str, Any]] = []
+        for _, row in df.iterrows():
+            date_str = cls._date_str(row.get("date"))
+            open_price = cls._finite_float(row.get("open"))
+            high = cls._finite_float(row.get("high"))
+            low = cls._finite_float(row.get("low"))
+            close = cls._finite_float(row.get("close"))
+
+            if not date_str or open_price is None or high is None or low is None or close is None:
+                continue
+            if high < low or not (low <= open_price <= high) or not (low <= close <= high):
+                continue
+
+            pct_chg = cls._finite_float(row.get("pct_chg"))
+            if pct_chg is None:
+                pct_chg = cls._finite_float(row.get("change_percent"))
+
+            rows.append({
+                "date": date_str,
+                "open": open_price,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": cls._finite_float(row.get("volume")),
+                "amount": cls._finite_float(row.get("amount")),
+                "change_percent": pct_chg,
+            })
+
+        rows.sort(key=lambda item: item["date"])
+        return rows[-effective_days:]
     
     def _get_placeholder_quote(self, stock_code: str) -> Dict[str, Any]:
         """

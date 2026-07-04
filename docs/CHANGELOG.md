@@ -65,6 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] Web 股票发现页新增日 K 线查看抽屉，可从股票列表和行情榜单打开蜡烛图与成交量图。
 - [测试] 增加股票历史 API、K 线抽屉、图表数据规范化和发现页 K 线入口测试。
 - [修复] Web 股票发现页 K 线抽屉关闭或切换股票时清空旧请求状态，避免重新打开时闪现上一只股票图表。
+- [改进] 股票历史 API 改为 DB-first 加载日 K，支持 `force_refresh`、缓存降级和数据源/截至日期等元信息，减少重复打开 K 线时的外部行情请求。
+- [改进] Web 股票发现页 K 线抽屉新增缓存状态、刷新、MA5/MA10/MA20、成交量开关和十字光标 OHLC 信息栏。
+- [测试] 增加股票历史缓存快照、stale fallback、K 线刷新状态、均线和 crosshair 清理测试。
+- [修复] 修正 K 线图重复日期归一化、无 ResizeObserver 时 crosshair 订阅清理和缺失涨跌幅展示。
 
 ## [3.16.0] - 2026-05-10
 

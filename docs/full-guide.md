@@ -1152,7 +1152,7 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 - 🧭 **首次配置提示** - 首页会读取只读配置状态，缺少 LLM 主渠道、自选股等基础项时提示缺口并引导进入系统设置
 - 📊 **实时进度** - 分析任务状态实时更新，支持多任务并行；普通分析链路在进入 LLM 阶段后会优先尝试 LiteLLM 流式生成，并通过任务 SSE 回灌更细粒度的 `message/progress`
 - 🗂️ **大盘复盘任务可见性** - 首页触发大盘复盘后会返回 `task_id` 并轮询 `GET /api/v1/analysis/status/{task_id}`，在进行中/完成/失败场景给出可见反馈，失败时直接透出报错内容
-- 🔎 **股票发现** - Web 端可按市场、行业、关键词筛选股票，使用紧凑工具区、表格内滚动和 20/50/100 分页浏览可关注股票，并可从列表或行情榜单查看日 K 线、进入分析或问股
+- 🔎 **股票发现** - Web 端可按市场、行业、关键词筛选股票，使用紧凑工具区、表格内滚动和 20/50/100 分页浏览可关注股票，并可从列表或行情榜单查看带缓存状态、刷新、均线和十字光标信息的日 K 线，或进入分析/问股
 - 🤖 **历史报告追问上下文** - 首页历史报告的「追问 AI」会创建新的问股会话，在消息流中展示可展开的报告来源卡片，刷新、服务重启或切换历史会话后仍可恢复，并持续注入给后续追问
 - 📈 **回测验证** - 评估历史分析准确率，查询方向胜率与模拟收益
 - 🔗 **API 文档** - 访问 `/docs` 查看 Swagger UI
@@ -1177,7 +1177,7 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 | `/api/v1/backtest/performance` | GET | 获取整体回测表现 |
 | `/api/v1/backtest/performance/{code}` | GET | 获取单股回测表现 |
 | `/api/v1/stocks/rankings?market=CN|BSE|HK|US&metric=change_pct|amount|volume&direction=desc|asc` | GET | 查询股票行情榜单，`limit` 范围 1..100，`industry=__uncategorized__` 表示未分类 |
-| `/api/v1/stocks/{stock_code}/history?period=daily&days=30` | GET | 查询个股日 K 历史数据，Web 发现页 K 线抽屉复用该接口，`days` 可选 30/90/180/365 |
+| `/api/v1/stocks/{stock_code}/history?period=daily&days=30&force_refresh=false` | GET | 查询个股日 K 历史数据，Web 发现页 K 线抽屉复用该接口，`days` 可选 30/90/180/365；响应包含 `source/cache_hit/stale/as_of_date/message` 等缓存元信息 |
 | `/api/v1/stocks/extract-from-image` | POST | 从图片提取股票代码（multipart，超时 60s） |
 | `/api/v1/stocks/parse-import` | POST | 解析 CSV/Excel/剪贴板（multipart file 或 JSON `{"text":"..."}`，文件≤2MB，文本≤100KB） |
 | `/api/health` | GET | 健康检查 |
@@ -1185,7 +1185,7 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 
 > 说明：`POST /api/v1/analysis/analyze` 在 `async_mode=false` 时仅支持单只股票；批量 `stock_codes` 需使用 `async_mode=true`。异步 `202` 响应对单股返回 `task_id`，对批量返回 `accepted` / `duplicates` 汇总结构。
 > 说明：Web「追问 AI」保存的是会话级 `analysis_report` 上下文快照，不写入 `conversation_messages`；`previousAnalysisSummary` / `previousStrategy` 以 JSON 文本存储并按原始 object/string 形态返回。原报告后续删除不会清空已保存快照，但首次 `PUT context` 时若 `sourceRecordId` 不存在会返回 404。导出会话和发送通知第一版只包含聊天消息正文，不包含上下文卡片内容。
-> 说明：Web「股票发现」页第一版基于 `stocks.index.json` 在前端完成市场、行业与关键词筛选，不新增 `/api/v1/stocks/discover`。页面将标题、筛选和覆盖率统计合并为紧凑工具区；可关注股票列表使用表格内滚动、固定表头和 `20/50/100` 每页数量选择，避免长列表撑高页面。列表和行情榜单提供「K线」图标入口，打开右侧抽屉查看 `30/90/180/365` 天日 K 蜡烛图与成交量；当前仅复用已有 `GET /api/v1/stocks/{stock_code}/history?period=daily`，不提供周/月 K 或指标叠加。行业字段由 `scripts/generate_index_from_csv.py` 从 `data/stock_list_*.csv` 或 `data/stock_industry_overrides.csv` 静态写入；`industrySource` 仅使用 `tushare` / `override` / `unknown`，缺失行业归入 `__uncategorized__`。`GET /api/v1/stocks/rankings` 返回 `status=ok|partial|stale|unsupported|unavailable`，字段包含 `code/name/market/industry/price/change_pct/amount/volume/source/updated_at/message`，其中 `source` 表示实际成功返回行情的数据源；`unavailable` 表示行情源失败且没有可用缓存，区别于筛选后自然空列表的 `ok + items=[]`。A 股/北交所/港股批量行情复用现有超时、限流、熔断和缓存保护，美股榜单仅覆盖 `data/us_ranking_core_pool.csv` 核心池并使用 TTL 缓存。
+> 说明：Web「股票发现」页第一版基于 `stocks.index.json` 在前端完成市场、行业与关键词筛选，不新增 `/api/v1/stocks/discover`。页面将标题、筛选和覆盖率统计合并为紧凑工具区；可关注股票列表使用表格内滚动、固定表头和 `20/50/100` 每页数量选择，避免长列表撑高页面。列表和行情榜单提供「K线」图标入口，打开右侧抽屉查看 `30/90/180/365` 天日 K 蜡烛图与成交量；历史接口优先读取本地 DB 缓存，手动刷新会传 `force_refresh=true` 尝试重新拉取外部行情源，失败时可回退旧缓存并显示 `stale/message`。抽屉展示数据源、缓存/实时/旧缓存、截至日期和记录数，并提供 MA5/MA10/MA20、成交量开关和十字光标 OHLC 信息栏。当前仅支持日 K，不提供周/月 K、复权、MACD 或 BOLL。行业字段由 `scripts/generate_index_from_csv.py` 从 `data/stock_list_*.csv` 或 `data/stock_industry_overrides.csv` 静态写入；`industrySource` 仅使用 `tushare` / `override` / `unknown`，缺失行业归入 `__uncategorized__`。`GET /api/v1/stocks/rankings` 返回 `status=ok|partial|stale|unsupported|unavailable`，字段包含 `code/name/market/industry/price/change_pct/amount/volume/source/updated_at/message`，其中 `source` 表示实际成功返回行情的数据源；`unavailable` 表示行情源失败且没有可用缓存，区别于筛选后自然空列表的 `ok + items=[]`。A 股/北交所/港股批量行情复用现有超时、限流、熔断和缓存保护，美股榜单仅覆盖 `data/us_ranking_core_pool.csv` 核心池并使用 TTL 缓存。
 > 说明：`POST /api/v1/analysis/market-review` 采用后端与 CLI/Bot 共用的配置路径（`GeminiAnalyzer(config=...)` 与同样的搜索/提示词构造入口）。Provider 兼容路由会优先识别并使用 `litellm_model`、`llm_model_list`，若未配置则回退 legacy `GEMINI_*`、`OPENAI_*`、`ANTHROPIC_*`、`DEEPSEEK_*` 键；不会新增/调整 provider、Base URL 或 LiteLLM 路由语义。
 > 审计依据：优先级与回退语义以 `src/config.py` 的 `Config._load_from_env()` 为准（`LITELLM_CONFIG` > `LLM_CHANNELS` > legacy）。配套回归见 `tests/test_llm_channel_config.py`（配置源解析）与 `tests/test_market_review_runtime.py`（共享装配路径）。该接口当前仅提供单进程/单机级防重复能力，若为多实例部署需通过外部任务队列或分布式锁补齐全局幂等。
 > 说明：该端点若返回 `task_id`，WebUI 会轮询 `GET /api/v1/analysis/status/{task_id}` 展示状态。状态为 `completed` 时给出完成提示（报告已生成并按配置推送），状态为 `failed` 时在前端错误区域显示 `error` 原因。

@@ -20,6 +20,14 @@ const historyPayload = (code = '000001.SZ'): StockHistoryResponse => ({
   stockCode: code,
   stockName: '平安银行',
   period: 'daily',
+  source: 'db_cache',
+  cacheHit: true,
+  stale: false,
+  partialCache: false,
+  asOfDate: '2026-06-01',
+  actualRecords: 1,
+  requestedDays: 90,
+  effectiveDays: 90,
   data: [
     { date: '2026-06-01', open: 10, high: 11, low: 9, close: 10.5, volume: 1000 },
   ],
@@ -45,8 +53,77 @@ describe('StockKLineDrawer', () => {
     expect(await screen.findByTestId('kline-chart')).toHaveTextContent('chart 1');
     expect(stocksApi.getHistory).toHaveBeenCalledWith(
       '000001.SZ',
-      expect.objectContaining({ days: 90, signal: expect.any(AbortSignal) }),
+      expect.objectContaining({ days: 90, forceRefresh: false, signal: expect.any(AbortSignal) }),
     );
+    expect(screen.getByText('缓存')).toBeInTheDocument();
+    expect(screen.getByText('截至 2026-06-01')).toBeInTheDocument();
+    expect(screen.getByText('1 条')).toBeInTheDocument();
+  });
+
+  it('refreshes with forceRefresh and updates stale cache status', async () => {
+    vi.mocked(stocksApi.getHistory)
+      .mockResolvedValueOnce(historyPayload())
+      .mockResolvedValueOnce({
+        ...historyPayload(),
+        stale: true,
+        message: '实时源失败，正在展示缓存数据',
+      });
+
+    render(
+      <StockKLineDrawer
+        isOpen
+        stockCode="000001.SZ"
+        stockName="平安银行"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByTestId('kline-chart')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '刷新 K 线' }));
+
+    await waitFor(() => {
+      expect(stocksApi.getHistory).toHaveBeenCalledTimes(2);
+    });
+    expect(stocksApi.getHistory).toHaveBeenLastCalledWith(
+      '000001.SZ',
+      expect.objectContaining({ days: 90, forceRefresh: true, signal: expect.any(AbortSignal) }),
+    );
+    expect(await screen.findByText('旧缓存')).toBeInTheDocument();
+    expect(screen.getByText('实时源失败，正在展示缓存数据')).toBeInTheDocument();
+  });
+
+  it('reuses session cache when reopening the same stock and range', async () => {
+    const { rerender } = render(
+      <StockKLineDrawer
+        isOpen
+        stockCode="000001.SZ"
+        stockName="平安银行"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByTestId('kline-chart')).toHaveTextContent('chart 1');
+
+    rerender(
+      <StockKLineDrawer
+        isOpen={false}
+        stockCode={undefined}
+        stockName={undefined}
+        onClose={vi.fn()}
+      />,
+    );
+
+    rerender(
+      <StockKLineDrawer
+        isOpen
+        stockCode="000001.SZ"
+        stockName="平安银行"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByTestId('kline-chart')).toHaveTextContent('chart 1');
+    expect(stocksApi.getHistory).toHaveBeenCalledTimes(1);
   });
 
   it('aborts the previous request when switching ranges', async () => {

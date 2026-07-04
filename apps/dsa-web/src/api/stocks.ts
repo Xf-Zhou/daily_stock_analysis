@@ -62,6 +62,15 @@ export type StockHistoryResponse = {
   stockCode: string;
   stockName?: string | null;
   period: 'daily';
+  source?: string | null;
+  cacheHit?: boolean | null;
+  stale?: boolean | null;
+  partialCache?: boolean | null;
+  asOfDate?: string | null;
+  actualRecords?: number | null;
+  requestedDays?: number | null;
+  effectiveDays?: number | null;
+  message?: string | null;
   data: KLineData[];
 };
 
@@ -69,6 +78,7 @@ export type StockHistoryDays = 30 | 90 | 180 | 365;
 
 export type StockHistoryParams = {
   days?: StockHistoryDays;
+  forceRefresh?: boolean;
   signal?: AbortSignal;
 };
 
@@ -121,7 +131,7 @@ export const stocksApi = {
   },
 
   async getHistory(stockCode: string, params: StockHistoryParams = {}): Promise<StockHistoryResponse> {
-    const { days = 90, signal } = params;
+    const { days = 90, forceRefresh = false, signal } = params;
     const encodedStockCode = encodeURIComponent(stockCode);
     const response = await apiClient.get<Record<string, unknown>>(
       `/api/v1/stocks/${encodedStockCode}/history`,
@@ -129,6 +139,7 @@ export const stocksApi = {
         params: {
           period: 'daily',
           days,
+          force_refresh: forceRefresh,
         },
         signal,
       },
