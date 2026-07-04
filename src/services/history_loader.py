@@ -20,6 +20,7 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 _CACHE_MIN_RECORDS = 30
 _HISTORY_MAX_DAYS = 365
+_WINDOW_MIN_WEEKDAY_COVERAGE = 0.60
 
 # ---------------------------------------------------------------------------
 # Frozen target date (ContextVar) – set once per stock in pipeline, read by
@@ -224,7 +225,16 @@ def _bars_cover_calendar_window(bars: list, start: date, end: date) -> bool:
     earliest_date = min(dates, default=date.max)
     # A range may begin on a weekend or market holiday, so allow the first
     # available bar to be a few calendar days after the requested window start.
-    return latest_date >= end and earliest_date <= start + timedelta(days=7)
+    if latest_date < end or earliest_date > start + timedelta(days=7):
+        return False
+
+    weekday_count = sum(
+        1
+        for offset in range((end - start).days + 1)
+        if (start + timedelta(days=offset)).weekday() < 5
+    )
+    minimum_records = max(1, int(weekday_count * _WINDOW_MIN_WEEKDAY_COVERAGE))
+    return len({bar_date for bar_date in dates if bar_date != date.min}) >= minimum_records
 
 
 def load_history_snapshot(

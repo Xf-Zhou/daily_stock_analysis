@@ -51,6 +51,15 @@ def _df_rows(code: str, latest: date, count: int) -> pd.DataFrame:
     return pd.DataFrame([row.to_dict() for row in _rows(code, latest, count)])
 
 
+def _sparse_window_rows(code: str, start: date, end: date) -> list[_DailyRow]:
+    return [
+        _DailyRow(code, start),
+        _DailyRow(code, start + timedelta(days=90)),
+        _DailyRow(code, start + timedelta(days=180)),
+        _DailyRow(code, end),
+    ]
+
+
 class _FakeDb:
     def __init__(self, rows_by_code=None) -> None:
         self.rows_by_code = rows_by_code or {}
@@ -182,6 +191,30 @@ class StockHistorySnapshotTestCase(unittest.TestCase):
         self.assertEqual(result.start_date, expected_start.isoformat())
         self.assertEqual(result.end_date, effective.isoformat())
         self.assertGreaterEqual(min(row.date for row in result.df.itertuples()), expected_start)
+
+    def test_sparse_db_cache_inside_window_fetches_fuller_history(self) -> None:
+        from src.services.history_loader import load_history_snapshot
+
+        effective = date(2026, 7, 3)
+        expected_start = date(2025, 7, 4)
+        db = _FakeDb({"000001": _sparse_window_rows("000001", expected_start, effective)})
+        network_df = _df_rows("000001", effective, 365)
+        manager = SimpleNamespace(get_daily_data=MagicMock(return_value=(network_df, "eastmoney")))
+
+        with patch("src.storage.get_db", return_value=db), \
+             patch("src.services.history_loader._get_fetcher_manager", return_value=manager), \
+             patch("src.core.trading_calendar.get_effective_trading_date", return_value=effective):
+            result = load_history_snapshot("000001.SZ", days=365)
+
+        manager.get_daily_data.assert_called_once_with(
+            "000001.SZ",
+            start_date=expected_start.isoformat(),
+            end_date=effective.isoformat(),
+            days=365,
+        )
+        self.assertEqual(result.source, "eastmoney")
+        self.assertFalse(result.cache_hit)
+        self.assertFalse(result.partial_cache)
 
     def test_network_success_persists_with_normalized_write_code(self) -> None:
         from src.services.history_loader import load_history_snapshot
