@@ -3,9 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApiError, createParsedApiError } from '../../api/error';
 import { AuthProvider, useAuth } from '../AuthContext';
 
-const { getStatus, login, changePassword, logout, resetDashboardState } = vi.hoisted(() => ({
+const { getStatus, login, loginMfa, changePassword, logout, resetDashboardState } = vi.hoisted(() => ({
   getStatus: vi.fn(),
   login: vi.fn(),
+  loginMfa: vi.fn(),
   changePassword: vi.fn(),
   logout: vi.fn(),
   resetDashboardState: vi.fn(),
@@ -15,6 +16,7 @@ vi.mock('../../api/auth', () => ({
   authApi: {
     getStatus,
     login,
+    loginMfa,
     changePassword,
     logout,
   },
@@ -37,6 +39,9 @@ const Probe = () => {
       <span data-testid="password-set">{auth.passwordSet ? 'set' : 'unset'}</span>
       <button type="button" onClick={() => void auth.login('passwd6', 'passwd6')}>
         trigger-login
+      </button>
+      <button type="button" onClick={() => void auth.loginMfa('123456')}>
+        trigger-login-mfa
       </button>
       <button type="button" onClick={() => void auth.logout()}>
         trigger-logout
@@ -77,6 +82,45 @@ describe('AuthContext', () => {
 
     await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('logged-in'));
     expect(screen.getByTestId('password-set')).toHaveTextContent('set');
+  });
+
+  it('waits for MFA before marking the user logged in', async () => {
+    getStatus
+      .mockResolvedValueOnce({
+        authEnabled: true,
+        loggedIn: false,
+        passwordSet: true,
+        passwordChangeable: true,
+        setupState: 'enabled',
+        mfaEnabled: true,
+        mfaRequired: true,
+      })
+      .mockResolvedValueOnce({
+        authEnabled: true,
+        loggedIn: true,
+        passwordSet: true,
+        passwordChangeable: true,
+        setupState: 'enabled',
+        mfaEnabled: true,
+        mfaRequired: false,
+      });
+    login.mockResolvedValue({ mfaRequired: true });
+    loginMfa.mockResolvedValue({ ok: true });
+
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>
+    );
+
+    await screen.findByTestId('status');
+    fireEvent.click(screen.getByRole('button', { name: 'trigger-login' }));
+
+    await waitFor(() => expect(login).toHaveBeenCalled());
+    expect(screen.getByTestId('status')).toHaveTextContent('logged-out');
+
+    fireEvent.click(screen.getByRole('button', { name: 'trigger-login-mfa' }));
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('logged-in'));
   });
 
   it('refreshes auth state after logout', async () => {

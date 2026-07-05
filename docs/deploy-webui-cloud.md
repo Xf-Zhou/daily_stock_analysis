@@ -323,9 +323,9 @@ sudo systemctl reload nginx
 ADMIN_AUTH_ENABLED=true
 ```
 
-重启服务后，第一次访问网页时会要求设置初始密码。设置完成后，每次打开设置页面都需要输入密码，可以防止 API Key 等敏感配置被他人看到。
+重启服务后，第一次访问网页时会要求设置初始密码。设置完成后，每次打开设置页面都需要输入密码，可以防止 API Key 等敏感配置被他人看到。系统设置页还可以绑定 TOTP MFA；启用后登录需要密码 + 验证器验证码或恢复码。MFA 是应用层第二因素，不替代 HTTPS、可信反向代理、VPN 或 Cloudflare Access。
 
-> 如果忘了密码，可以在服务器上执行：`python -m src.auth reset_password`
+> 如果忘了密码，可以在服务器上执行：`python -m src.auth reset_password`；如果丢失 MFA 设备和恢复码，可以执行：`python -m src.auth reset_mfa`。
 
 ---
 

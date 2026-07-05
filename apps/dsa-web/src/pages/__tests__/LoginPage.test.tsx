@@ -32,6 +32,7 @@ describe('LoginPage', () => {
     const login = vi.fn();
     useAuthMock.mockReturnValue({
       login,
+      loginMfa: vi.fn(),
       passwordSet: false,
       setupState: 'no_password',
     });
@@ -51,6 +52,7 @@ describe('LoginPage', () => {
   it('navigates to redirect after a successful login', async () => {
     useAuthMock.mockReturnValue({
       login: vi.fn().mockResolvedValue({ success: true }),
+      loginMfa: vi.fn(),
       passwordSet: true,
       setupState: 'enabled',
     });
@@ -64,9 +66,35 @@ describe('LoginPage', () => {
     expect(screen.getByLabelText('登录密码')).toHaveAttribute('data-appearance', 'login');
   });
 
+  it('shows MFA step before navigating when login requires MFA', async () => {
+    const login = vi.fn().mockResolvedValue({ success: true, mfaRequired: true });
+    const loginMfa = vi.fn().mockResolvedValue({ success: true });
+    useAuthMock.mockReturnValue({
+      login,
+      loginMfa,
+      passwordSet: true,
+      setupState: 'enabled',
+    });
+
+    render(<LoginPage />);
+
+    fireEvent.change(screen.getByLabelText('登录密码'), { target: { value: 'passwd6' } });
+    fireEvent.click(screen.getByRole('button', { name: '授权进入工作台' }));
+
+    expect(await screen.findByLabelText('验证码或恢复码')).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('验证码或恢复码'), { target: { value: '123456' } });
+    fireEvent.click(screen.getByRole('button', { name: '完成二次验证' }));
+
+    await waitFor(() => expect(loginMfa).toHaveBeenCalledWith('123456'));
+    expect(navigate).toHaveBeenCalledWith('/settings', { replace: true });
+  });
+
   it('does not override login theme tokens inline so light mode can take effect', () => {
     useAuthMock.mockReturnValue({
       login: vi.fn(),
+      loginMfa: vi.fn(),
       passwordSet: true,
       setupState: 'enabled',
     });

@@ -13,20 +13,31 @@ from pydantic import BaseModel, Field
 from api.deps import get_system_config_service
 from src.auth import (
     COOKIE_NAME,
+    MFA_CHALLENGE_COOKIE_NAME,
+    MFA_CHALLENGE_TTL_SECONDS,
     SESSION_MAX_AGE_HOURS_DEFAULT,
     change_password,
     check_rate_limit,
+    confirm_pending_mfa_setup,
+    create_mfa_challenge,
+    create_pending_mfa_setup,
     clear_rate_limit,
     create_session,
+    disable_mfa,
+    get_recovery_codes_remaining,
     get_client_ip,
     has_stored_password,
     is_auth_enabled,
+    is_mfa_enabled,
     is_password_changeable,
     is_password_set,
     record_login_failure,
+    regenerate_recovery_codes,
     refresh_auth_state,
     rotate_session_secret,
     set_initial_password,
+    verify_mfa_challenge,
+    verify_mfa_code,
     verify_password,
     verify_stored_password,
     verify_session,
@@ -48,6 +59,14 @@ class LoginRequest(BaseModel):
     password_confirm: str | None = Field(default=None, alias="passwordConfirm", description="Confirm (first-time)")
 
 
+class MfaLoginRequest(BaseModel):
+    """Second-step MFA login request."""
+
+    model_config = {"populate_by_name": True}
+
+    code: str = Field(default="", description="TOTP or recovery code")
+
+
 class ChangePasswordRequest(BaseModel):
     """Change password request body."""
 
@@ -56,6 +75,7 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(default="", alias="currentPassword")
     new_password: str = Field(default="", alias="newPassword")
     new_password_confirm: str = Field(default="", alias="newPasswordConfirm")
+    mfa_code: str = Field(default="", alias="mfaCode")
 
 
 class AuthSettingsRequest(BaseModel):
@@ -67,6 +87,35 @@ class AuthSettingsRequest(BaseModel):
     password: str = Field(default="")
     password_confirm: str | None = Field(default=None, alias="passwordConfirm")
     current_password: str = Field(default="", alias="currentPassword")
+    mfa_code: str = Field(default="", alias="mfaCode")
+
+
+class MfaSetupStartRequest(BaseModel):
+    """Start MFA setup after verifying the admin password."""
+
+    model_config = {"populate_by_name": True}
+
+    current_password: str = Field(default="", alias="currentPassword")
+    mfa_code: str = Field(default="", alias="mfaCode")
+
+
+class MfaSetupConfirmRequest(BaseModel):
+    """Confirm a pending MFA setup with a TOTP code."""
+
+    model_config = {"populate_by_name": True}
+
+    current_password: str = Field(default="", alias="currentPassword")
+    code: str = Field(default="", description="TOTP code from authenticator app")
+    mfa_code: str = Field(default="", alias="mfaCode")
+
+
+class MfaProtectedRequest(BaseModel):
+    """Request body for MFA-protected settings operations."""
+
+    model_config = {"populate_by_name": True}
+
+    current_password: str = Field(default="", alias="currentPassword")
+    mfa_code: str = Field(default="", alias="mfaCode")
 
 
 def _cookie_params(request: Request) -> dict:
@@ -154,6 +203,41 @@ def _set_session_cookie(response: Response, session_value: str, request: Request
     )
 
 
+def _set_mfa_challenge_cookie(response: Response, challenge_value: str, request: Request) -> None:
+    """Attach a short-lived MFA challenge cookie scoped to the MFA endpoint."""
+    params = _cookie_params(request)
+    response.set_cookie(
+        key=MFA_CHALLENGE_COOKIE_NAME,
+        value=challenge_value,
+        httponly=params["httponly"],
+        samesite=params["samesite"],
+        secure=params["secure"],
+        path="/api/v1/auth/login/mfa",
+        max_age=MFA_CHALLENGE_TTL_SECONDS,
+    )
+
+
+def _clear_mfa_challenge_cookie(response: Response) -> None:
+    """Clear the short-lived MFA challenge cookie."""
+    response.delete_cookie(key=MFA_CHALLENGE_COOKIE_NAME, path="/api/v1/auth/login/mfa")
+
+
+def _mfa_required_response(request: Request, content: dict | None = None) -> JSONResponse:
+    """Return an MFA-required response and issue a signed short-lived challenge."""
+    challenge = create_mfa_challenge()
+    if not challenge:
+        return JSONResponse(
+            status_code=500,
+            content={"error": "internal_error", "message": "Failed to create MFA challenge"},
+        )
+    payload = {"ok": True, "mfaRequired": True}
+    if content:
+        payload.update(content)
+    response = JSONResponse(content=payload)
+    _set_mfa_challenge_cookie(response, challenge, request)
+    return response
+
+
 def _get_auth_status_dict(request: Request | None = None) -> dict:
     """Helper to build consistent auth status response body."""
     auth_enabled = is_auth_enabled()
@@ -173,12 +257,18 @@ def _get_auth_status_dict(request: Request | None = None) -> dict:
     else:
         setup_state = "no_password"
 
+    mfa_enabled = is_mfa_enabled()
+    recovery_remaining = get_recovery_codes_remaining() if logged_in else None
+
     return {
         "authEnabled": auth_enabled,
         "loggedIn": logged_in,
         "passwordSet": _password_set_for_response(auth_enabled),
         "passwordChangeable": is_password_changeable() if auth_enabled else False,
         "setupState": setup_state,
+        "mfaEnabled": mfa_enabled,
+        "mfaRequired": bool(auth_enabled and mfa_enabled and not logged_in),
+        "recoveryCodesRemaining": recovery_remaining,
     }
 
 
@@ -190,6 +280,70 @@ def _get_auth_status_dict(request: Request | None = None) -> dict:
 async def auth_status(request: Request):
     """Return authEnabled, loggedIn, passwordSet, passwordChangeable, setupState without requiring auth."""
     return _get_auth_status_dict(request)
+
+
+def _rate_limited_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={
+            "error": "rate_limited",
+            "message": "Too many failed attempts. Please try again later.",
+        },
+    )
+
+
+def _verify_current_password_or_response(request: Request, current_password: str) -> JSONResponse | None:
+    """Verify current stored admin password for settings operations."""
+    if not current_password:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "current_required", "message": "请输入当前管理员密码"},
+        )
+    ip = get_client_ip(request)
+    if not check_rate_limit(ip):
+        return _rate_limited_response()
+    if not verify_stored_password(current_password):
+        record_login_failure(ip)
+        return JSONResponse(
+            status_code=401,
+            content={"error": "invalid_password", "message": "当前密码错误"},
+        )
+    return None
+
+
+def _verify_mfa_or_response(request: Request, mfa_code: str) -> JSONResponse | None:
+    """Verify MFA for sensitive settings operations when configured."""
+    if not is_mfa_enabled():
+        return None
+    if not mfa_code:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "mfa_required", "message": "请输入 MFA 验证码或恢复码"},
+        )
+    ip = get_client_ip(request)
+    if not check_rate_limit(ip):
+        return _rate_limited_response()
+    if not verify_mfa_code(mfa_code):
+        record_login_failure(ip)
+        return JSONResponse(
+            status_code=401,
+            content={"error": "invalid_mfa_code", "message": "MFA 验证码或恢复码无效"},
+        )
+    return None
+
+
+def _new_session_response(request: Request, content: dict) -> JSONResponse:
+    """Create a fresh admin session after sensitive operations that rotate session secret."""
+    session_val = create_session()
+    if not session_val:
+        return JSONResponse(
+            status_code=500,
+            content={"error": "internal_error", "message": "Failed to create session"},
+        )
+    response = JSONResponse(content=content)
+    _set_session_cookie(response, session_val, request)
+    clear_rate_limit(get_client_ip(request))
+    return response
 
 
 @router.post(
@@ -210,6 +364,8 @@ async def auth_update_settings(request: Request, body: AuthSettingsRequest):
     password = (body.password or "").strip()
     confirm = (body.password_confirm or "").strip()
     current_password = (body.current_password or "").strip()
+    mfa_code = (body.mfa_code or "").strip()
+    reenable_requires_mfa = False
 
     if target_enabled:
         if password or confirm:
@@ -260,54 +416,45 @@ async def auth_update_settings(request: Request, body: AuthSettingsRequest):
             is_valid_session = cookie_val and verify_session(cookie_val)
             
             if not is_valid_session:
-                if not current_password:
-                    return JSONResponse(
-                        status_code=400,
-                        content={"error": "current_required", "message": "重新开启认证前请输入当前密码"},
-                    )
-                ip = get_client_ip(request)
-                if not check_rate_limit(ip):
-                    return JSONResponse(
-                        status_code=429,
-                        content={
-                            "error": "rate_limited",
-                            "message": "Too many failed attempts. Please try again later.",
-                        },
-                    )
-                if not verify_stored_password(current_password):
-                    record_login_failure(ip)
-                    return JSONResponse(
-                        status_code=401,
-                        content={"error": "invalid_password", "message": "当前密码错误"},
-                    )
-                clear_rate_limit(ip)
+                password_error = _verify_current_password_or_response(request, current_password)
+                if password_error:
+                    password_error_body = getattr(password_error, "body", b"")
+                    if b"current_required" in password_error_body:
+                        return JSONResponse(
+                            status_code=400,
+                            content={"error": "current_required", "message": "重新开启认证前请输入当前密码"},
+                        )
+                    return password_error
+                reenable_requires_mfa = bool(is_mfa_enabled() and not current_enabled)
     else:
         if current_enabled:
-            cookie_val = request.cookies.get(COOKIE_NAME)
-            is_valid_session = cookie_val and verify_session(cookie_val)
+            if is_mfa_enabled():
+                password_error = _verify_current_password_or_response(request, current_password)
+                if password_error:
+                    password_error_body = getattr(password_error, "body", b"")
+                    if b"current_required" in password_error_body:
+                        return JSONResponse(
+                            status_code=400,
+                            content={"error": "current_required", "message": "关闭认证前请输入当前密码"},
+                        )
+                    return password_error
+                mfa_error = _verify_mfa_or_response(request, mfa_code)
+                if mfa_error:
+                    return mfa_error
+            else:
+                cookie_val = request.cookies.get(COOKIE_NAME)
+                is_valid_session = cookie_val and verify_session(cookie_val)
 
-            if not is_valid_session:
-                if not current_password:
-                    return JSONResponse(
-                        status_code=400,
-                        content={"error": "current_required", "message": "关闭认证前请输入当前密码"},
-                    )
-                ip = get_client_ip(request)
-                if not check_rate_limit(ip):
-                    return JSONResponse(
-                        status_code=429,
-                        content={
-                            "error": "rate_limited",
-                            "message": "Too many failed attempts. Please try again later.",
-                        },
-                    )
-                if not verify_stored_password(current_password):
-                    record_login_failure(ip)
-                    return JSONResponse(
-                        status_code=401,
-                        content={"error": "invalid_password", "message": "当前密码错误"},
-                    )
-                clear_rate_limit(ip)
+                if not is_valid_session:
+                    password_error = _verify_current_password_or_response(request, current_password)
+                    if password_error:
+                        password_error_body = getattr(password_error, "body", b"")
+                        if b"current_required" in password_error_body:
+                            return JSONResponse(
+                                status_code=400,
+                                content={"error": "current_required", "message": "关闭认证前请输入当前密码"},
+                            )
+                        return password_error
 
     if target_enabled != current_enabled:
         if not _apply_auth_enabled(target_enabled, request=request):
@@ -331,6 +478,14 @@ async def auth_update_settings(request: Request, body: AuthSettingsRequest):
             )
 
     if target_enabled:
+        if reenable_requires_mfa:
+            content = _get_auth_status_dict(request)
+            content["authEnabled"] = True
+            content["passwordSet"] = True
+            content["mfaRequired"] = True
+            content["loggedIn"] = False
+            return _mfa_required_response(request, content=content)
+
         session_val = create_session()
         if not session_val:
             rollback_ok = _apply_auth_enabled(current_enabled, request=request)
@@ -346,6 +501,7 @@ async def auth_update_settings(request: Request, body: AuthSettingsRequest):
         content["loggedIn"] = True
         resp = JSONResponse(content=content)
         _set_session_cookie(resp, session_val, request)
+        clear_rate_limit(get_client_ip(request))
         return resp
 
     resp = JSONResponse(content=_get_auth_status_dict(request))
@@ -410,6 +566,9 @@ async def auth_login(request: Request, body: LoginRequest):
                 content={"error": "invalid_password", "message": "密码错误"},
             )
 
+    if is_mfa_enabled():
+        return _mfa_required_response(request)
+
     clear_rate_limit(ip)
     session_val = create_session()
     if not session_val:
@@ -424,11 +583,194 @@ async def auth_login(request: Request, body: LoginRequest):
 
 
 @router.post(
+    "/login/mfa",
+    summary="Complete MFA login",
+    description="Verify a short-lived MFA challenge and TOTP/recovery code before issuing a full session.",
+)
+async def auth_login_mfa(request: Request, body: MfaLoginRequest):
+    """Complete the second MFA login step."""
+    if not is_auth_enabled():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "auth_disabled", "message": "Authentication is not configured"},
+        )
+
+    ip = get_client_ip(request)
+    if not check_rate_limit(ip):
+        return _rate_limited_response()
+
+    challenge = request.cookies.get(MFA_CHALLENGE_COOKIE_NAME)
+    if not challenge or not verify_mfa_challenge(challenge):
+        record_login_failure(ip)
+        return JSONResponse(
+            status_code=401,
+            content={"error": "invalid_mfa_challenge", "message": "MFA challenge 已失效，请重新输入密码"},
+        )
+
+    if not verify_mfa_code(body.code):
+        record_login_failure(ip)
+        return JSONResponse(
+            status_code=401,
+            content={"error": "invalid_mfa_code", "message": "MFA 验证码或恢复码无效"},
+        )
+
+    clear_rate_limit(ip)
+    session_val = create_session()
+    if not session_val:
+        return JSONResponse(
+            status_code=500,
+            content={"error": "internal_error", "message": "Failed to create session"},
+        )
+
+    resp = JSONResponse(content={"ok": True, "mfaRequired": False})
+    _set_session_cookie(resp, session_val, request)
+    _clear_mfa_challenge_cookie(resp)
+    return resp
+
+
+@router.post(
+    "/mfa/setup/start",
+    summary="Start MFA setup",
+    description="Create a short-lived server-side pending TOTP secret after password verification.",
+)
+async def auth_mfa_setup_start(request: Request, body: MfaSetupStartRequest):
+    """Start MFA enrollment and return the otpauth URI for QR rendering."""
+    if not is_auth_enabled():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "auth_disabled", "message": "Authentication is not configured"},
+        )
+
+    password_error = _verify_current_password_or_response(request, body.current_password.strip())
+    if password_error:
+        return password_error
+    mfa_error = _verify_mfa_or_response(request, body.mfa_code.strip())
+    if mfa_error:
+        return mfa_error
+
+    setup = create_pending_mfa_setup()
+    return {
+        "ok": True,
+        "secret": setup["secret"],
+        "otpauthUri": setup["otpauth_uri"],
+        "expiresAt": setup["expires_at"],
+    }
+
+
+@router.post(
+    "/mfa/setup/confirm",
+    summary="Confirm MFA setup",
+    description="Verify a pending TOTP secret and enable MFA.",
+)
+async def auth_mfa_setup_confirm(request: Request, body: MfaSetupConfirmRequest):
+    """Confirm MFA enrollment and return recovery codes once."""
+    if not is_auth_enabled():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "auth_disabled", "message": "Authentication is not configured"},
+        )
+
+    password_error = _verify_current_password_or_response(request, body.current_password.strip())
+    if password_error:
+        return password_error
+    mfa_error = _verify_mfa_or_response(request, body.mfa_code.strip())
+    if mfa_error:
+        return mfa_error
+
+    ok, recovery_codes = confirm_pending_mfa_setup(body.code.strip())
+    if not ok:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_mfa_setup", "message": "MFA 绑定已过期或验证码无效"},
+        )
+
+    content = _get_auth_status_dict(request)
+    content.update(
+        {
+            "ok": True,
+            "loggedIn": True,
+            "mfaEnabled": True,
+            "mfaRequired": False,
+            "recoveryCodesRemaining": len(recovery_codes),
+            "recoveryCodes": recovery_codes,
+        }
+    )
+    return _new_session_response(request, content)
+
+
+@router.delete(
+    "/mfa",
+    summary="Disable MFA",
+    description="Disable MFA after current password and MFA verification.",
+)
+async def auth_mfa_disable(request: Request, body: MfaProtectedRequest):
+    """Disable MFA and rotate all existing sessions."""
+    if not is_mfa_enabled():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "mfa_not_enabled", "message": "MFA 尚未启用"},
+        )
+
+    password_error = _verify_current_password_or_response(request, body.current_password.strip())
+    if password_error:
+        return password_error
+    mfa_error = _verify_mfa_or_response(request, body.mfa_code.strip())
+    if mfa_error:
+        return mfa_error
+
+    if not disable_mfa():
+        return JSONResponse(
+            status_code=500,
+            content={"error": "internal_error", "message": "Failed to disable MFA"},
+        )
+
+    content = _get_auth_status_dict(request)
+    content.update(
+        {"ok": True, "loggedIn": True, "mfaEnabled": False, "mfaRequired": False, "recoveryCodesRemaining": None}
+    )
+    return _new_session_response(request, content)
+
+
+@router.post(
+    "/mfa/recovery-codes",
+    summary="Regenerate MFA recovery codes",
+    description="Replace single-use recovery codes after password and MFA verification.",
+)
+async def auth_mfa_regenerate_recovery_codes(request: Request, body: MfaProtectedRequest):
+    """Regenerate recovery codes and return them once."""
+    if not is_mfa_enabled():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "mfa_not_enabled", "message": "MFA 尚未启用"},
+        )
+
+    password_error = _verify_current_password_or_response(request, body.current_password.strip())
+    if password_error:
+        return password_error
+    mfa_error = _verify_mfa_or_response(request, body.mfa_code.strip())
+    if mfa_error:
+        return mfa_error
+
+    recovery_codes = regenerate_recovery_codes()
+    if recovery_codes is None:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "mfa_not_enabled", "message": "MFA 尚未启用"},
+        )
+
+    return {
+        "ok": True,
+        "recoveryCodes": recovery_codes,
+        "recoveryCodesRemaining": len(recovery_codes),
+    }
+
+
+@router.post(
     "/change-password",
     summary="Change password",
     description="Change password. Requires valid session.",
 )
-async def auth_change_password(body: ChangePasswordRequest):
+async def auth_change_password(request: Request, body: ChangePasswordRequest):
     """Change password. Requires login."""
     if not is_password_changeable():
         return JSONResponse(
@@ -450,6 +792,20 @@ async def auth_change_password(body: ChangePasswordRequest):
             status_code=400,
             content={"error": "password_mismatch", "message": "两次输入的新密码不一致"},
         )
+
+    ip = get_client_ip(request)
+    if not check_rate_limit(ip):
+        return _rate_limited_response()
+    if not verify_stored_password(current):
+        record_login_failure(ip)
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_password", "message": "当前密码错误"},
+        )
+
+    mfa_error = _verify_mfa_or_response(request, body.mfa_code.strip())
+    if mfa_error:
+        return mfa_error
 
     err = change_password(current, new_pwd)
     if err:

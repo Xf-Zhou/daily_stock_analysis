@@ -372,7 +372,7 @@ daily_stock_analysis/
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
 | `STOCK_LIST` | 自选股代码（逗号分隔） | - |
-| `ADMIN_AUTH_ENABLED` | Web 登录：设为 `true` 启用密码保护；首次访问在网页设置初始密码，可在「系统设置 > 修改密码」修改；忘记密码执行 `python -m src.auth reset_password`。Web 的 `.env` 备份导入导出仅在开启该开关后可用（桌面端不受此限制）。 | `false` |
+| `ADMIN_AUTH_ENABLED` | Web 登录：设为 `true` 启用密码保护；首次访问在网页设置初始密码，可在「系统设置 > 修改密码」修改；设置页可绑定 TOTP MFA，登录会变为密码 + 验证码/恢复码两步；忘记密码执行 `python -m src.auth reset_password`，丢失 MFA 执行 `python -m src.auth reset_mfa`。Web 的 `.env` 备份导入导出仅在开启该开关后可用（桌面端不受此限制）。 | `false` |
 | `TRUST_X_FORWARDED_FOR` | 单层可信反向代理部署时设为 `true`，取 `X-Forwarded-For` 最右值作为真实客户端 IP（用于登录限流等）；直连公网时保持 `false` 防伪造。多级代理/CDN 场景下限流 key 可能退化为边缘代理 IP，需额外评估 | `false` |
 | `MAX_WORKERS` | 并发线程数 | `3` |
 | `MARKET_REVIEW_ENABLED` | 启用大盘复盘 | `true` |
@@ -1148,6 +1148,7 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 ### 功能特性
 
 - 📝 **配置管理** - 查看/修改自选股列表
+- 🔐 **登录保护** - 可通过 `ADMIN_AUTH_ENABLED=true` 开启管理员密码登录，并在系统设置页绑定 TOTP MFA；关闭管理员认证会保留 MFA 配置但暂停生效，重新开启后仍需完成 MFA
 - 🚀 **快速分析** - 通过 API 接口触发个股分析；首页也提供“大盘复盘”按钮，可在 Docker/server 模式下后台触发大盘复盘
 - 🧭 **首次配置提示** - 首页会读取只读配置状态，缺少 LLM 主渠道、自选股等基础项时提示缺口并引导进入系统设置
 - 📊 **实时进度** - 分析任务状态实时更新，支持多任务并行；普通分析链路在进入 LLM 阶段后会优先尝试 LiteLLM 流式生成，并通过任务 SSE 回灌更细粒度的 `message/progress`
@@ -1185,6 +1186,7 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 
 > 说明：`POST /api/v1/analysis/analyze` 在 `async_mode=false` 时仅支持单只股票；批量 `stock_codes` 需使用 `async_mode=true`。异步 `202` 响应对单股返回 `task_id`，对批量返回 `accepted` / `duplicates` 汇总结构。
 > 说明：Web「追问 AI」保存的是会话级 `analysis_report` 上下文快照，不写入 `conversation_messages`；`previousAnalysisSummary` / `previousStrategy` 以 JSON 文本存储并按原始 object/string 形态返回。原报告后续删除不会清空已保存快照，但首次 `PUT context` 时若 `sourceRecordId` 不存在会返回 404。导出会话和发送通知第一版只包含聊天消息正文，不包含上下文卡片内容。
+> 说明：Web 管理员认证的 MFA 是应用层第二因素，第一版仅支持单管理员 TOTP 验证器应用和一次性恢复码。登录流程为密码验证通过后设置 5 分钟签名 challenge，再由 `/api/v1/auth/login/mfa` 校验 TOTP 或恢复码并签发完整 session。首次绑定、禁用 MFA、重新生成恢复码、修改密码，以及 MFA 已启用时关闭管理员认证，都需要当前密码和 MFA 验证。启用、禁用 MFA 或执行 `python -m src.auth reset_mfa` 会轮换 session secret，使旧 session 失效；如果轮换失败，MFA 配置变更会回滚，不会留下半启用/半禁用状态。MFA 配置存储在数据目录 `.admin_mfa.json`，恢复码只在生成时显示一次。MFA 不能替代 HTTPS、可信反向代理、VPN 或 Cloudflare Access；公网部署仍应启用 HTTPS，并按拓扑评估 `TRUST_X_FORWARDED_FOR`。
 > 说明：Web「股票发现」页第一版基于 `stocks.index.json` 在前端完成市场、行业与关键词筛选，不新增 `/api/v1/stocks/discover`。页面将标题、筛选和覆盖率统计合并为紧凑工具区；可关注股票列表使用表格内滚动、固定表头和 `20/50/100` 每页数量选择，避免长列表撑高页面。列表和行情榜单提供自选星标，直接通过现有 `GET/PUT /api/v1/system/config` 读写 `STOCK_LIST`，写回格式统一为逗号分隔标准代码（如 `600519,HK00700,AAPL`）；保存期间全局禁用星标，配置版本冲突时会重新拉取配置并提示重试。列表可切换「只看自选」，该过滤只影响可关注股票列表，不影响行情榜单。列表和行情榜单提供「K线」图标入口，打开右侧抽屉查看 `30/90/180/365` 个自然日窗口内的日 K 蜡烛图与成交量；历史接口优先读取本地 DB 缓存，但缓存未覆盖当前请求自然日窗口时会先尝试补拉外部行情源，手动刷新会传 `force_refresh=true` 尝试重新拉取外部行情源，失败时可回退旧缓存并显示 `stale/message`。抽屉展示数据源、缓存/实时/旧缓存、截至日期和记录数，并提供 MA5/MA10/MA20、成交量开关和十字光标 OHLC 信息栏。当前仅支持日 K，不提供周/月 K、复权、MACD 或 BOLL。行业字段由 `scripts/generate_index_from_csv.py` 从 `data/stock_list_*.csv` 或 `data/stock_industry_overrides.csv` 静态写入；`industrySource` 仅使用 `tushare` / `override` / `unknown`，缺失行业归入 `__uncategorized__`。`GET /api/v1/stocks/rankings` 返回 `status=ok|partial|stale|unsupported|unavailable`，字段包含 `code/name/market/industry/price/change_pct/amount/volume/source/updated_at/message`，其中 `source` 表示实际成功返回行情的数据源；`unavailable` 表示行情源失败且没有可用缓存，区别于筛选后自然空列表的 `ok + items=[]`。A 股/北交所/港股批量行情复用现有超时、限流、熔断和缓存保护，美股榜单仅覆盖 `data/us_ranking_core_pool.csv` 核心池并使用 TTL 缓存。
 > 说明：`POST /api/v1/analysis/market-review` 采用后端与 CLI/Bot 共用的配置路径（`GeminiAnalyzer(config=...)` 与同样的搜索/提示词构造入口）。Provider 兼容路由会优先识别并使用 `litellm_model`、`llm_model_list`，若未配置则回退 legacy `GEMINI_*`、`OPENAI_*`、`ANTHROPIC_*`、`DEEPSEEK_*` 键；不会新增/调整 provider、Base URL 或 LiteLLM 路由语义。
 > 审计依据：优先级与回退语义以 `src/config.py` 的 `Config._load_from_env()` 为准（`LITELLM_CONFIG` > `LLM_CHANNELS` > legacy）。配套回归见 `tests/test_llm_channel_config.py`（配置源解析）与 `tests/test_market_review_runtime.py`（共享装配路径）。该接口当前仅提供单进程/单机级防重复能力，若为多实例部署需通过外部任务队列或分布式锁补齐全局幂等。

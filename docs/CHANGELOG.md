@@ -76,6 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [测试] 增加发现页自选股星标交互与 market-aware 股票代码归一化测试。
 - [修复] Web 股票发现页操作反馈改为悬浮提示，避免成功/失败提示出现时挤压页面布局。
 - [修复] Web 股票发现页自选配置刷新失败时保留已加载自选并允许退出「只看自选」，保存成功后不再依赖额外配置读取，旧列表裸港股代码会按股票索引标准化写回。
+- [新功能] Web 管理员登录新增可选 TOTP MFA，支持签名短期 challenge、一次性恢复码、设置页绑定/禁用/重置恢复码和 `python -m src.auth reset_mfa`。
+- [修复] MFA 已启用时关闭管理员认证必须同时验证当前密码和 MFA，并修复 MFA 启用/禁用时 session secret 轮换失败后的状态回滚。
 
 ## [3.16.0] - 2026-05-10
 

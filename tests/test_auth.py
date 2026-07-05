@@ -2,6 +2,10 @@
 """Unit tests for src.auth module."""
 
 import hashlib
+import base64
+from concurrent.futures import ThreadPoolExecutor
+import hmac
+import struct
 import os
 import secrets
 import tempfile
@@ -20,6 +24,16 @@ def _reset_auth_globals() -> None:
     auth._password_hash_salt = None
     auth._password_hash_stored = None
     auth._rate_limit = {}
+
+
+def _totp_code(secret: str, timestamp: int) -> str:
+    """Generate an RFC 6238 TOTP code in tests without depending on pyotp."""
+    key = base64.b32decode(secret, casefold=True)
+    counter = timestamp // 30
+    digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    code_int = struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF
+    return f"{code_int % 1_000_000:06d}"
 
 
 class AuthValidationTestCase(unittest.TestCase):
@@ -155,6 +169,132 @@ class AuthSessionTestCase(unittest.TestCase):
             new_secret = secret_path.read_bytes()
             self.assertEqual(len(new_secret), 32)
             self.assertNotEqual(new_secret, b"x")
+
+        self._patch_env_and_run(test_fn=run)
+
+    def test_mfa_challenge_is_signed_purpose_bound_and_expires(self) -> None:
+        def run():
+            with patch.object(auth, "time") as mock_time:
+                mock_time.time.return_value = 1000
+                challenge = auth.create_mfa_challenge()
+                wrong_purpose = auth.create_mfa_challenge(purpose="other")
+
+            self.assertTrue(challenge)
+            with patch.object(auth, "time") as mock_time:
+                mock_time.time.return_value = 1000
+                self.assertTrue(auth.verify_mfa_challenge(challenge))
+                self.assertFalse(auth.verify_mfa_challenge(wrong_purpose))
+
+            parts = challenge.split(".")
+            tampered = f"{parts[0]}.bad-signature"
+            self.assertFalse(auth.verify_mfa_challenge(tampered))
+
+            with patch.object(auth, "time") as mock_time:
+                mock_time.time.return_value = 1000 + auth.MFA_CHALLENGE_TTL_SECONDS + 1
+                self.assertFalse(auth.verify_mfa_challenge(challenge))
+
+        self._patch_env_and_run(test_fn=run)
+
+    def test_mfa_totp_and_recovery_codes_are_single_use(self) -> None:
+        def run():
+            secret = "JBSWY3DPEHPK3PXP"
+            recovery_codes = auth.enable_mfa_for_secret(secret, recovery_codes=["ABCD-EFGH"])
+            self.assertEqual(recovery_codes, ["ABCD-EFGH"])
+            code = _totp_code(secret, 1_700_000_000)
+
+            with patch.object(auth, "time") as mock_time:
+                mock_time.time.return_value = 1_700_000_000
+                self.assertTrue(auth.verify_mfa_code(code))
+                self.assertFalse(auth.verify_mfa_code(code), "same TOTP counter must not replay")
+
+            self.assertTrue(auth.verify_mfa_code("ABCD-EFGH"))
+            self.assertFalse(auth.verify_mfa_code("ABCD-EFGH"), "same recovery code must not replay")
+            self.assertEqual(auth.get_recovery_codes_remaining(), 0)
+
+        self._patch_env_and_run(test_fn=run)
+
+    def test_mfa_totp_and_recovery_codes_are_single_use_under_concurrency(self) -> None:
+        def run():
+            secret = "JBSWY3DPEHPK3PXP"
+            auth.enable_mfa_for_secret(secret, recovery_codes=["ABCD-EFGH"])
+            code = _totp_code(secret, 1_700_000_000)
+
+            with patch.object(auth, "time") as mock_time:
+                mock_time.time.return_value = 1_700_000_000
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    results = list(executor.map(auth.verify_mfa_code, [code, code]))
+            self.assertEqual(results.count(True), 1)
+            self.assertEqual(results.count(False), 1)
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                recovery_results = list(executor.map(auth.verify_mfa_code, ["ABCD-EFGH", "ABCD-EFGH"]))
+            self.assertEqual(recovery_results.count(True), 1)
+            self.assertEqual(recovery_results.count(False), 1)
+
+        self._patch_env_and_run(test_fn=run)
+
+    def test_reset_mfa_removes_config_pending_setup_and_rotates_sessions(self) -> None:
+        def run():
+            old_session = auth.create_session()
+            auth.enable_mfa_for_secret("JBSWY3DPEHPK3PXP", recovery_codes=["ABCD-EFGH"])
+            auth.create_pending_mfa_setup()
+
+            self.assertTrue(auth.is_mfa_enabled())
+            self.assertTrue((self.data_dir / ".admin_mfa_pending.json").exists())
+
+            self.assertTrue(auth.reset_mfa())
+
+            self.assertFalse(auth.is_mfa_enabled())
+            self.assertFalse((self.data_dir / ".admin_mfa.json").exists())
+            self.assertFalse((self.data_dir / ".admin_mfa_pending.json").exists())
+            self.assertFalse(auth.verify_session(old_session), "reset_mfa must rotate session secret")
+
+        self._patch_env_and_run(test_fn=run)
+
+    def test_enable_mfa_rolls_back_when_session_rotation_fails(self) -> None:
+        def run():
+            with patch.object(auth, "rotate_session_secret", return_value=False):
+                self.assertIsNone(
+                    auth.enable_mfa_for_secret("JBSWY3DPEHPK3PXP", recovery_codes=["ABCD-EFGH"])
+                )
+
+            self.assertFalse(auth.is_mfa_enabled())
+            self.assertFalse((self.data_dir / ".admin_mfa.json").exists())
+
+        self._patch_env_and_run(test_fn=run)
+
+    def test_disable_mfa_rolls_back_when_session_rotation_fails(self) -> None:
+        def run():
+            self.assertEqual(
+                auth.enable_mfa_for_secret("JBSWY3DPEHPK3PXP", recovery_codes=["ABCD-EFGH"]),
+                ["ABCD-EFGH"],
+            )
+
+            with patch.object(auth, "rotate_session_secret", return_value=False):
+                self.assertFalse(auth.disable_mfa())
+
+            self.assertTrue(auth.is_mfa_enabled())
+            self.assertTrue((self.data_dir / ".admin_mfa.json").exists())
+
+        self._patch_env_and_run(test_fn=run)
+
+    def test_confirm_pending_mfa_rolls_back_when_session_rotation_fails(self) -> None:
+        def run():
+            timestamp = 1_700_000_000
+            with patch.object(auth, "time") as mock_time:
+                mock_time.time.return_value = timestamp
+                setup = auth.create_pending_mfa_setup()
+                code = _totp_code(setup["secret"], timestamp)
+
+            with patch.object(auth, "rotate_session_secret", return_value=False):
+                with patch.object(auth, "time") as mock_time:
+                    mock_time.time.return_value = timestamp
+                    ok, recovery_codes = auth.confirm_pending_mfa_setup(code)
+
+            self.assertFalse(ok)
+            self.assertEqual(recovery_codes, [])
+            self.assertFalse(auth.is_mfa_enabled())
+            self.assertTrue((self.data_dir / ".admin_mfa_pending.json").exists())
 
         self._patch_env_and_run(test_fn=run)
 

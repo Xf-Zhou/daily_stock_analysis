@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useState, useEffect } from 'react';
 import { motion, useMotionValue, useTransform, useSpring } from "motion/react";
-import { Lock, Loader2, Cpu, TrendingUp, Network, ShieldCheck } from "lucide-react";
+import { KeyRound, Lock, Loader2, Cpu, TrendingUp, Network, ShieldCheck } from "lucide-react";
 import { Button, Input, ParticleBackground } from '../components/common';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { ParsedApiError } from '../api/error';
@@ -10,7 +10,7 @@ import { useAuth } from '../hooks';
 import { SettingsAlert } from '../components/settings';
 
 const LoginPage: React.FC = () => {
-  const { login, passwordSet, setupState } = useAuth();
+  const { login, loginMfa, passwordSet, setupState } = useAuth();
   const navigate = useNavigate();
 
   // Set page title
@@ -24,6 +24,8 @@ const LoginPage: React.FC = () => {
 
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaStep, setMfaStep] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | ParsedApiError | null>(null);
 
@@ -51,6 +53,25 @@ const LoginPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (mfaStep) {
+      if (!mfaCode.trim()) {
+        setError('请输入 MFA 验证码或恢复码');
+        return;
+      }
+      setIsSubmitting(true);
+      try {
+        const result = await loginMfa(mfaCode.trim());
+        if (result.success) {
+          navigate(redirect, { replace: true });
+        } else {
+          setError(result.error ?? 'MFA 验证失败');
+        }
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
     if (isFirstTime && password !== passwordConfirm) {
       setError('两次输入的密码不一致');
       return;
@@ -59,6 +80,11 @@ const LoginPage: React.FC = () => {
     try {
       const result = await login(password, isFirstTime ? passwordConfirm : undefined);
       if (result.success) {
+        if (result.mfaRequired) {
+          setMfaStep(true);
+          setMfaCode('');
+          return;
+        }
         navigate(redirect, { replace: true });
       } else {
         setError(result.error ?? '登录失败');
@@ -151,7 +177,12 @@ const LoginPage: React.FC = () => {
 
             <div className="mb-8">
               <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-[var(--login-text-primary)]">
-                {isFirstTime ? (
+                {mfaStep ? (
+                  <>
+                    <KeyRound className="h-5 w-5 text-[var(--login-accent-text)]" />
+                    <span>MFA 验证</span>
+                  </>
+                ) : isFirstTime ? (
                   <>
                     <ShieldCheck className="h-6 w-6 text-emerald-400" />
                     <span>设置初始密码</span>
@@ -164,7 +195,9 @@ const LoginPage: React.FC = () => {
                 )}
               </h1>
               <p className="mt-2 text-sm text-[var(--login-text-secondary)]">
-                {isFirstTime
+                {mfaStep
+                  ? '请输入验证器应用中的 6 位验证码，或使用一次性恢复码。'
+                  : isFirstTime
                   ? '首次启用认证，请为系统工作台设置管理员密码。'
                   : '访问 DSA 量化决策引擎需要有效的身份凭证。'}
               </p>
@@ -172,6 +205,22 @@ const LoginPage: React.FC = () => {
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="space-y-4">
+                {mfaStep ? (
+                  <Input
+                    id="mfaCode"
+                    type="text"
+                    appearance="login"
+                    iconType="password"
+                    label="验证码或恢复码"
+                    placeholder="输入 6 位验证码或恢复码"
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value)}
+                    disabled={isSubmitting}
+                    autoFocus
+                    autoComplete="one-time-code"
+                  />
+                ) : (
+                  <>
                 <Input
                   id="password"
                   type="password"
@@ -202,6 +251,8 @@ const LoginPage: React.FC = () => {
                     autoComplete="new-password"
                   />
                 )}
+                  </>
+                )}
               </div>
 
               {error && (
@@ -230,14 +281,30 @@ const LoginPage: React.FC = () => {
                   {isSubmitting ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>{isFirstTime ? '初始化中...' : '正在建立连接...'}</span>
+                      <span>{mfaStep ? '正在验证...' : isFirstTime ? '初始化中...' : '正在建立连接...'}</span>
                     </>
                   ) : (
-                    <span>{isFirstTime ? '完成设置并登录' : '授权进入工作台'}</span>
+                    <span>{mfaStep ? '完成二次验证' : isFirstTime ? '完成设置并登录' : '授权进入工作台'}</span>
                   )}
                 </div>
                 <div className="absolute inset-0 z-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] pointer-events-none" />
               </Button>
+
+              {mfaStep ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-10 w-full text-[var(--login-text-secondary)]"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    setMfaStep(false);
+                    setMfaCode('');
+                    setError(null);
+                  }}
+                >
+                  重新输入密码
+                </Button>
+              ) : null}
             </form>
           </div>
         </motion.div>

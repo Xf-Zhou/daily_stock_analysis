@@ -9,27 +9,36 @@ First login sets initial password; supports web change-password and CLI reset.
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 import getpass
 import hashlib
 import hmac
+import json
 import logging
 import os
 import secrets
 import sys
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 from dotenv import dotenv_values
+import pyotp
 
 logger = logging.getLogger(__name__)
 
 COOKIE_NAME = "dsa_session"
+MFA_CHALLENGE_COOKIE_NAME = "dsa_mfa_challenge"
 PBKDF2_ITERATIONS = 100_000
 RATE_LIMIT_WINDOW_SEC = 300
 RATE_LIMIT_MAX_FAILURES = 5
 SESSION_MAX_AGE_HOURS_DEFAULT = 24
 MIN_PASSWORD_LEN = 6
+MFA_CHALLENGE_TTL_SECONDS = 300
+MFA_PENDING_TTL_SECONDS = 600
+MFA_CHALLENGE_PURPOSE = "mfa_login"
+MFA_ISSUER = "Daily Stock Analysis"
+MFA_ACCOUNT = "admin"
 
 # Lazy-loaded state
 _auth_enabled: Optional[bool] = None
@@ -38,6 +47,7 @@ _password_hash_salt: Optional[bytes] = None
 _password_hash_stored: Optional[bytes] = None
 _rate_limit: dict[str, Tuple[int, float]] = {}
 _rate_limit_lock = None
+_mfa_thread_lock = None
 
 
 def _get_lock():
@@ -47,6 +57,15 @@ def _get_lock():
         import threading
         _rate_limit_lock = threading.Lock()
     return _rate_limit_lock
+
+
+def _get_mfa_thread_lock():
+    """Fallback process-local lock for platforms without fcntl."""
+    global _mfa_thread_lock
+    if _mfa_thread_lock is None:
+        import threading
+        _mfa_thread_lock = threading.Lock()
+    return _mfa_thread_lock
 
 
 def _ensure_env_loaded() -> None:
@@ -64,6 +83,95 @@ def _get_data_dir() -> Path:
 def _get_credential_path() -> Path:
     """Path to stored password hash file."""
     return _get_data_dir() / ".admin_password_hash"
+
+
+def _get_mfa_path() -> Path:
+    """Path to stored MFA configuration."""
+    return _get_data_dir() / ".admin_mfa.json"
+
+
+def _get_mfa_pending_path() -> Path:
+    """Path to short-lived pending MFA setup state."""
+    return _get_data_dir() / ".admin_mfa_pending.json"
+
+
+@contextmanager
+def _mfa_file_lock():
+    """Cross-process lock for MFA read/modify/write operations."""
+    data_dir = _get_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = data_dir / ".admin_mfa.lock"
+    try:
+        import fcntl  # type: ignore
+
+        with open(lock_path, "a+", encoding="utf-8") as lock_file:
+            try:
+                lock_path.chmod(0o600)
+            except OSError:
+                pass
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    except ImportError:
+        lock = _get_mfa_thread_lock()
+        with lock:
+            yield
+
+
+def _read_json_file(path: Path) -> Optional[dict[str, Any]]:
+    """Read a JSON object from disk, returning None for missing/invalid files."""
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to read JSON auth state from %s: %s", path, exc)
+        return None
+
+
+def _write_json_file(path: Path, data: dict[str, Any]) -> None:
+    """Atomically write a JSON object with owner-only permissions."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    tmp_path.chmod(0o600)
+    tmp_path.replace(path)
+
+
+def _delete_file_if_exists(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        logger.warning("Failed to remove %s: %s", path, exc)
+
+
+def _restore_json_file(path: Path, data: Optional[dict[str, Any]]) -> None:
+    """Restore a JSON state file snapshot or remove it when the snapshot was absent."""
+    if data is None:
+        _delete_file_if_exists(path)
+        return
+    _write_json_file(path, data)
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode((value + padding).encode("ascii"))
+
+
+def _mfa_hmac_key(label: bytes) -> Optional[bytes]:
+    secret = _get_session_secret()
+    if not secret:
+        return None
+    return hmac.new(secret, label, hashlib.sha256).digest()
 
 
 def _is_auth_enabled_from_env() -> bool:
@@ -367,6 +475,272 @@ def verify_session(value: str) -> bool:
     return True
 
 
+def create_mfa_challenge(purpose: str = MFA_CHALLENGE_PURPOSE) -> str:
+    """Create a signed short-lived MFA challenge token."""
+    key = _mfa_hmac_key(b"dsa-mfa-challenge-v1")
+    if not key:
+        return ""
+    payload = {
+        "purpose": purpose,
+        "nonce": secrets.token_urlsafe(24),
+        "ts": int(time.time()),
+    }
+    payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    sig = hmac.new(key, payload_b64.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{payload_b64}.{sig}"
+
+
+def verify_mfa_challenge(value: str, purpose: str = MFA_CHALLENGE_PURPOSE) -> bool:
+    """Verify a signed MFA challenge token and its short TTL."""
+    key = _mfa_hmac_key(b"dsa-mfa-challenge-v1")
+    if not key or not value:
+        return False
+    try:
+        payload_b64, sig = value.split(".", 1)
+    except ValueError:
+        return False
+    expected = hmac.new(key, payload_b64.encode("ascii"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return False
+    try:
+        payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    if not isinstance(payload, dict) or payload.get("purpose") != purpose:
+        return False
+    try:
+        ts = int(payload.get("ts", 0))
+    except (TypeError, ValueError):
+        return False
+    if ts <= 0 or time.time() - ts > MFA_CHALLENGE_TTL_SECONDS:
+        return False
+    return True
+
+
+def _normalize_recovery_code(code: str) -> str:
+    """Normalize a recovery code while preserving hyphen grouping."""
+    return "".join(str(code or "").strip().upper().split())
+
+
+def _hash_recovery_code(code: str) -> dict[str, str]:
+    salt = secrets.token_bytes(32)
+    derived = hashlib.pbkdf2_hmac(
+        "sha256",
+        _normalize_recovery_code(code).encode("utf-8"),
+        salt=salt,
+        iterations=PBKDF2_ITERATIONS,
+    )
+    return {
+        "salt": base64.standard_b64encode(salt).decode("ascii"),
+        "hash": base64.standard_b64encode(derived).decode("ascii"),
+    }
+
+
+def _verify_recovery_code(code: str, entry: dict[str, str]) -> bool:
+    try:
+        salt = base64.standard_b64decode(entry.get("salt", ""))
+        stored_hash = base64.standard_b64decode(entry.get("hash", ""))
+    except (ValueError, TypeError):
+        return False
+    computed = hashlib.pbkdf2_hmac(
+        "sha256",
+        _normalize_recovery_code(code).encode("utf-8"),
+        salt=salt,
+        iterations=PBKDF2_ITERATIONS,
+    )
+    return hmac.compare_digest(computed, stored_hash)
+
+
+def generate_recovery_codes(count: int = 10) -> list[str]:
+    """Generate human-readable single-use recovery codes."""
+    return [
+        f"{secrets.token_hex(4).upper()}-{secrets.token_hex(4).upper()}"
+        for _ in range(count)
+    ]
+
+
+def _build_mfa_config(secret: str, codes: list[str]) -> dict[str, Any]:
+    """Build the MFA config payload; caller is responsible for locking."""
+    return {
+        "enabled": True,
+        "secret": secret,
+        "created_at": int(time.time()),
+        "last_used_counter": -1,
+        "recovery_codes": [_hash_recovery_code(code) for code in codes],
+    }
+
+
+def is_mfa_enabled() -> bool:
+    """Return whether a valid MFA configuration is stored."""
+    with _mfa_file_lock():
+        data = _read_json_file(_get_mfa_path())
+        return bool(data and data.get("enabled") and data.get("secret"))
+
+
+def get_recovery_codes_remaining() -> Optional[int]:
+    """Return remaining recovery-code count when MFA is configured."""
+    with _mfa_file_lock():
+        data = _read_json_file(_get_mfa_path())
+        if not data or not data.get("enabled"):
+            return None
+        codes = data.get("recovery_codes") or []
+        return len(codes) if isinstance(codes, list) else 0
+
+
+def enable_mfa_for_secret(secret: str, recovery_codes: Optional[list[str]] = None) -> Optional[list[str]]:
+    """Enable MFA for a server-generated TOTP secret and return plaintext recovery codes once."""
+    codes = recovery_codes or generate_recovery_codes()
+    mfa_path = _get_mfa_path()
+    pending_path = _get_mfa_pending_path()
+    with _mfa_file_lock():
+        previous_mfa = _read_json_file(mfa_path)
+        previous_pending = _read_json_file(pending_path)
+        _write_json_file(mfa_path, _build_mfa_config(secret, codes))
+        _delete_file_if_exists(pending_path)
+    if not rotate_session_secret():
+        with _mfa_file_lock():
+            _restore_json_file(mfa_path, previous_mfa)
+            _restore_json_file(pending_path, previous_pending)
+        return None
+    return codes
+
+
+def disable_mfa() -> bool:
+    """Disable MFA and rotate sessions."""
+    mfa_path = _get_mfa_path()
+    pending_path = _get_mfa_pending_path()
+    with _mfa_file_lock():
+        previous_mfa = _read_json_file(mfa_path)
+        previous_pending = _read_json_file(pending_path)
+        _delete_file_if_exists(mfa_path)
+        _delete_file_if_exists(pending_path)
+    if not rotate_session_secret():
+        with _mfa_file_lock():
+            _restore_json_file(mfa_path, previous_mfa)
+            _restore_json_file(pending_path, previous_pending)
+        return False
+    return True
+
+
+def reset_mfa() -> bool:
+    """Clear MFA state from the local server and rotate sessions."""
+    return disable_mfa()
+
+
+def create_pending_mfa_setup() -> dict[str, Any]:
+    """Create short-lived pending setup state for a TOTP enrollment."""
+    secret = pyotp.random_base32()
+    uri = pyotp.TOTP(secret).provisioning_uri(name=MFA_ACCOUNT, issuer_name=MFA_ISSUER)
+    created_at = int(time.time())
+    with _mfa_file_lock():
+        _write_json_file(
+            _get_mfa_pending_path(),
+            {
+                "secret": secret,
+                "created_at": created_at,
+                "expires_at": created_at + MFA_PENDING_TTL_SECONDS,
+            },
+        )
+    return {
+        "secret": secret,
+        "otpauth_uri": uri,
+        "expires_at": created_at + MFA_PENDING_TTL_SECONDS,
+    }
+
+
+def _load_valid_pending_mfa_setup() -> Optional[dict[str, Any]]:
+    pending = _read_json_file(_get_mfa_pending_path())
+    if not pending:
+        return None
+    try:
+        expires_at = int(pending.get("expires_at", 0))
+    except (TypeError, ValueError):
+        return None
+    if expires_at < int(time.time()):
+        _delete_file_if_exists(_get_mfa_pending_path())
+        return None
+    if not pending.get("secret"):
+        return None
+    return pending
+
+
+def confirm_pending_mfa_setup(code: str, recovery_codes: Optional[list[str]] = None) -> tuple[bool, list[str]]:
+    """Confirm pending MFA setup with a TOTP code and enable MFA."""
+    codes = recovery_codes or generate_recovery_codes()
+    mfa_path = _get_mfa_path()
+    pending_path = _get_mfa_pending_path()
+    with _mfa_file_lock():
+        previous_mfa = _read_json_file(mfa_path)
+        previous_pending = _read_json_file(pending_path)
+        pending = _load_valid_pending_mfa_setup()
+        if not pending:
+            return False, []
+        secret = str(pending["secret"])
+        totp = pyotp.TOTP(secret)
+        now = int(time.time())
+        if not any(
+            hmac.compare_digest(totp.at(counter * 30), str(code or "").strip())
+            for counter in range(now // 30 - 1, now // 30 + 2)
+        ):
+            return False, []
+        _write_json_file(mfa_path, _build_mfa_config(secret, codes))
+        _delete_file_if_exists(pending_path)
+    if not rotate_session_secret():
+        with _mfa_file_lock():
+            _restore_json_file(mfa_path, previous_mfa)
+            _restore_json_file(pending_path, previous_pending)
+        return False, []
+    return True, codes
+
+
+def regenerate_recovery_codes(recovery_codes: Optional[list[str]] = None) -> Optional[list[str]]:
+    """Replace recovery codes for an enabled MFA config and return plaintext codes once."""
+    codes = recovery_codes or generate_recovery_codes()
+    with _mfa_file_lock():
+        data = _read_json_file(_get_mfa_path())
+        if not data or not data.get("enabled") or not data.get("secret"):
+            return None
+        data["recovery_codes"] = [_hash_recovery_code(code) for code in codes]
+        _write_json_file(_get_mfa_path(), data)
+    return codes
+
+
+def verify_mfa_code(code: str) -> bool:
+    """Verify a TOTP or recovery code and atomically consume replayable state."""
+    submitted = str(code or "").strip()
+    if not submitted:
+        return False
+    with _mfa_file_lock():
+        data = _read_json_file(_get_mfa_path())
+        if not data or not data.get("enabled") or not data.get("secret"):
+            return False
+
+        secret = str(data["secret"])
+        now = int(time.time())
+        current_counter = now // 30
+        last_used = int(data.get("last_used_counter", -1))
+        if submitted.isdigit() and len(submitted) == 6:
+            totp = pyotp.TOTP(secret)
+            for counter in range(current_counter - 1, current_counter + 2):
+                if counter <= last_used:
+                    continue
+                if hmac.compare_digest(totp.at(counter * 30), submitted):
+                    data["last_used_counter"] = counter
+                    _write_json_file(_get_mfa_path(), data)
+                    return True
+
+        recovery_codes = data.get("recovery_codes") or []
+        if isinstance(recovery_codes, list):
+            for index, entry in enumerate(list(recovery_codes)):
+                if isinstance(entry, dict) and _verify_recovery_code(submitted, entry):
+                    del recovery_codes[index]
+                    data["recovery_codes"] = recovery_codes
+                    _write_json_file(_get_mfa_path(), data)
+                    return True
+
+    return False
+
+
 def get_client_ip(request) -> str:
     """Get client IP, respecting TRUST_X_FORWARDED_FOR.
 
@@ -488,11 +862,23 @@ def reset_password_cli() -> int:
     return 0
 
 
+def reset_mfa_cli() -> int:
+    """CLI to clear MFA state and rotate all sessions."""
+    _ensure_env_loaded()
+    if reset_mfa():
+        print("MFA has been reset successfully.")
+        return 0
+    print("Error: Failed to reset MFA", file=sys.stderr)
+    return 1
+
+
 def _main() -> int:
-    """CLI entry: reset_password subcommand."""
+    """CLI entry: auth maintenance subcommands."""
     if len(sys.argv) > 1 and sys.argv[1] == "reset_password":
         return reset_password_cli()
-    print("Usage: python -m src.auth reset_password", file=sys.stderr)
+    if len(sys.argv) > 1 and sys.argv[1] == "reset_mfa":
+        return reset_mfa_cli()
+    print("Usage: python -m src.auth reset_password|reset_mfa", file=sys.stderr)
     return 1
 
 

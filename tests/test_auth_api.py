@@ -121,6 +121,88 @@ class AuthApiTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'"ok":true', response.body)
 
+    def test_login_with_mfa_creates_challenge_not_full_session(self) -> None:
+        auth.set_initial_password("mypass456")
+        auth.enable_mfa_for_secret("JBSWY3DPEHPK3PXP", recovery_codes=["ABCD-EFGH"])
+
+        response = asyncio.run(
+            auth_endpoint.auth_login(
+                self._build_request(),
+                auth_endpoint.LoginRequest(password="mypass456"),
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'"mfaRequired":true', response.body)
+        cookie_header = response.headers["set-cookie"]
+        self.assertIn("dsa_mfa_challenge=", cookie_header)
+        self.assertIn("Path=/api/v1/auth/login/mfa", cookie_header)
+        self.assertNotIn("dsa_session=", cookie_header)
+
+    def test_mfa_login_endpoint_exempt_from_middleware(self) -> None:
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/auth/login/mfa",
+            "headers": [],
+            "query_string": b"",
+            "scheme": "http",
+            "client": ("127.0.0.1", 1234),
+            "server": ("testserver", 80),
+            "root_path": "",
+        }
+        request = Request(scope)
+        middleware = AuthMiddleware(app=MagicMock())
+        call_next = AsyncMock(return_value=Response(status_code=204))
+
+        with patch("api.middlewares.auth.is_auth_enabled", return_value=True):
+            response = asyncio.run(middleware.dispatch(request, call_next))
+
+        self.assertEqual(response.status_code, 204)
+        call_next.assert_awaited_once()
+
+    def test_mfa_login_rejects_tampered_challenge(self) -> None:
+        auth.set_initial_password("mypass456")
+        auth.enable_mfa_for_secret("JBSWY3DPEHPK3PXP", recovery_codes=["ABCD-EFGH"])
+
+        response = asyncio.run(
+            auth_endpoint.auth_login_mfa(
+                self._build_request(cookies={"dsa_mfa_challenge": "bad.challenge.sig"}),
+                auth_endpoint.MfaLoginRequest(code="ABCD-EFGH"),
+            )
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn(b'"error":"invalid_mfa_challenge"', response.body)
+
+    def test_mfa_login_success_sets_session_clears_challenge_and_rate_limit(self) -> None:
+        auth.set_initial_password("mypass456")
+        auth.enable_mfa_for_secret("JBSWY3DPEHPK3PXP", recovery_codes=["ABCD-EFGH"])
+        auth.record_login_failure("127.0.0.1")
+        challenge = auth.create_mfa_challenge()
+
+        response = asyncio.run(
+            auth_endpoint.auth_login_mfa(
+                self._build_request(cookies={"dsa_mfa_challenge": challenge}),
+                auth_endpoint.MfaLoginRequest(code="ABCD-EFGH"),
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        set_cookie_headers = [
+            value.decode("latin1")
+            for key, value in response.raw_headers
+            if key.lower() == b"set-cookie"
+        ]
+        self.assertTrue(any(header.startswith("dsa_session=") for header in set_cookie_headers))
+        self.assertTrue(
+            any(
+                header.startswith("dsa_mfa_challenge=") and "Max-Age=0" in header
+                for header in set_cookie_headers
+            )
+        )
+        self.assertNotIn("127.0.0.1", auth._rate_limit)
+
     def test_login_wrong_password_returns_401(self) -> None:
         first_response = asyncio.run(
             auth_endpoint.auth_login(
@@ -178,6 +260,7 @@ class AuthApiTestCase(unittest.TestCase):
 
         response = asyncio.run(
             auth_endpoint.auth_change_password(
+                self._build_request(),
                 auth_endpoint.ChangePasswordRequest(
                     currentPassword="oldpass6",
                     newPassword="newpass6",
@@ -198,6 +281,7 @@ class AuthApiTestCase(unittest.TestCase):
 
         response = asyncio.run(
             auth_endpoint.auth_change_password(
+                self._build_request(),
                 auth_endpoint.ChangePasswordRequest(
                     currentPassword="wrong",
                     newPassword="new123",
@@ -424,6 +508,73 @@ class AuthApiTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn(b'"error":"current_required"', response.body)
+
+    def test_auth_settings_disable_requires_current_password_and_mfa_when_mfa_enabled(self) -> None:
+        with patch.object(auth, "_is_auth_enabled_from_env", side_effect=self._read_auth_enabled_from_env):
+            auth.set_initial_password("passwd6")
+            auth.enable_mfa_for_secret("JBSWY3DPEHPK3PXP", recovery_codes=["ABCD-EFGH"])
+            session = auth.create_session()
+
+            valid_session_only = asyncio.run(
+                auth_endpoint.auth_update_settings(
+                    self._build_request(cookies={"dsa_session": session}),
+                    auth_endpoint.AuthSettingsRequest(authEnabled=False),
+                )
+            )
+            current_password_only = asyncio.run(
+                auth_endpoint.auth_update_settings(
+                    self._build_request(cookies={"dsa_session": session}),
+                    auth_endpoint.AuthSettingsRequest(authEnabled=False, currentPassword="passwd6"),
+                )
+            )
+            success = asyncio.run(
+                auth_endpoint.auth_update_settings(
+                    self._build_request(cookies={"dsa_session": session}),
+                    auth_endpoint.AuthSettingsRequest(
+                        authEnabled=False,
+                        currentPassword="passwd6",
+                        mfaCode="ABCD-EFGH",
+                    ),
+                )
+            )
+
+        self.assertEqual(valid_session_only.status_code, 400)
+        self.assertIn(b'"error":"current_required"', valid_session_only.body)
+        self.assertEqual(current_password_only.status_code, 400)
+        self.assertIn(b'"error":"mfa_required"', current_password_only.body)
+        self.assertEqual(success.status_code, 200)
+        self.assertIn(b'"authEnabled":false', success.body)
+
+    def test_change_password_requires_mfa_when_enabled(self) -> None:
+        auth.set_initial_password("oldpass6")
+        auth.enable_mfa_for_secret("JBSWY3DPEHPK3PXP", recovery_codes=["ABCD-EFGH"])
+
+        missing_mfa = asyncio.run(
+            auth_endpoint.auth_change_password(
+                self._build_request(),
+                auth_endpoint.ChangePasswordRequest(
+                    currentPassword="oldpass6",
+                    newPassword="newpass6",
+                    newPasswordConfirm="newpass6",
+                ),
+            )
+        )
+        self.assertEqual(missing_mfa.status_code, 400)
+        self.assertIn(b'"error":"mfa_required"', missing_mfa.body)
+
+        response = asyncio.run(
+            auth_endpoint.auth_change_password(
+                self._build_request(),
+                auth_endpoint.ChangePasswordRequest(
+                    currentPassword="oldpass6",
+                    newPassword="newpass6",
+                    newPasswordConfirm="newpass6",
+                    mfaCode="ABCD-EFGH",
+                ),
+            )
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assertTrue(auth.verify_stored_password("newpass6"))
         self.assertIn("ADMIN_AUTH_ENABLED=true", self.env_path.read_text(encoding="utf-8"))
 
     def test_auth_settings_toggle_fails_when_secret_rotation_fails(self) -> None:
@@ -465,6 +616,37 @@ class AuthApiTestCase(unittest.TestCase):
         self.assertIn(b'"passwordSet":true', enable_response.body)
         self.assertIn(b'"loggedIn":true', enable_response.body)
         self.assertIn("dsa_session=", enable_response.headers["set-cookie"])
+
+    def test_auth_settings_reenable_with_retained_mfa_requires_mfa_challenge(self) -> None:
+        with patch.object(auth, "_is_auth_enabled_from_env", side_effect=self._read_auth_enabled_from_env):
+            auth.set_initial_password("passwd6")
+            auth.enable_mfa_for_secret("JBSWY3DPEHPK3PXP", recovery_codes=["ABCD-EFGH"])
+            disable_response = asyncio.run(
+                auth_endpoint.auth_update_settings(
+                    self._build_request(),
+                    auth_endpoint.AuthSettingsRequest(
+                        authEnabled=False,
+                        currentPassword="passwd6",
+                        mfaCode="ABCD-EFGH",
+                    ),
+                )
+            )
+        self.assertEqual(disable_response.status_code, 200)
+
+        with patch.object(auth, "_is_auth_enabled_from_env", side_effect=self._read_auth_enabled_from_env):
+            enable_response = asyncio.run(
+                auth_endpoint.auth_update_settings(
+                    self._build_request(),
+                    auth_endpoint.AuthSettingsRequest(authEnabled=True, currentPassword="passwd6"),
+                )
+            )
+
+        self.assertEqual(enable_response.status_code, 200)
+        self.assertIn(b'"authEnabled":true', enable_response.body)
+        self.assertIn(b'"mfaRequired":true', enable_response.body)
+        cookie_header = enable_response.headers["set-cookie"]
+        self.assertIn("dsa_mfa_challenge=", cookie_header)
+        self.assertNotIn("dsa_session=", cookie_header)
 
     def test_auth_settings_enable_with_existing_password_requires_current_password(self) -> None:
         with patch.object(auth, "_is_auth_enabled_from_env", side_effect=self._read_auth_enabled_from_env):

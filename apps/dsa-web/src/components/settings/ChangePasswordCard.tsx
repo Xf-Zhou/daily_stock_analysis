@@ -8,10 +8,11 @@ import { SettingsAlert } from './SettingsAlert';
 import { SettingsSectionCard } from './SettingsSectionCard';
 
 export const ChangePasswordCard: React.FC = () => {
-  const { changePassword } = useAuth();
+  const { changePassword, mfaEnabled } = useAuth();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | ParsedApiError | null>(null);
@@ -38,15 +39,25 @@ export const ChangePasswordCard: React.FC = () => {
       setError('两次输入的新密码不一致');
       return;
     }
+    if (mfaEnabled && !mfaCode.trim()) {
+      setError('请输入 MFA 验证码或恢复码');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
-      const result = await changePassword(currentPassword, newPassword, newPasswordConfirm);
+      const result = await changePassword(
+        currentPassword,
+        newPassword,
+        newPasswordConfirm,
+        mfaEnabled ? mfaCode.trim() : undefined
+      );
       if (result.success) {
         setSuccess(true);
         setCurrentPassword('');
         setNewPassword('');
         setNewPasswordConfirm('');
+        setMfaCode('');
         setTimeout(() => setSuccess(false), 4000);
       } else {
         setError(result.error ?? '修改失败');
@@ -109,6 +120,21 @@ export const ChangePasswordCard: React.FC = () => {
             autoComplete="new-password"
           />
         </div>
+
+        {mfaEnabled ? (
+          <div className="space-y-3 md:max-w-md">
+            <Input
+              id="change-pass-mfa"
+              type="text"
+              label="MFA 验证码或恢复码"
+              placeholder="输入 6 位验证码或恢复码"
+              value={mfaCode}
+              onChange={(e) => setMfaCode(e.target.value)}
+              disabled={isSubmitting}
+              autoComplete="one-time-code"
+            />
+          </div>
+        ) : null}
 
         {error
           ? isParsedApiError(error)

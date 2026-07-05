@@ -100,6 +100,20 @@ class AuthStatusSetupStateTestCase(unittest.TestCase):
                 self.assertTrue(data["authEnabled"])
                 self.assertTrue(data["passwordSet"])
 
+    def test_status_hides_recovery_code_count_until_logged_in(self) -> None:
+        auth.set_initial_password("password123")
+        auth.enable_mfa_for_secret("JBSWY3DPEHPK3PXP", recovery_codes=["ABCD-EFGH"])
+
+        with patch("api.v1.endpoints.auth.is_auth_enabled", return_value=True):
+            with patch("src.auth.is_auth_enabled", return_value=True):
+                public_data = asyncio.run(auth_status(_make_request()))
+                self.assertTrue(public_data["mfaEnabled"])
+                self.assertIsNone(public_data.get("recoveryCodesRemaining"))
+
+                session = auth.create_session()
+                logged_in_data = asyncio.run(auth_status(_make_request(cookies={"dsa_session": session})))
+                self.assertEqual(logged_in_data["recoveryCodesRemaining"], 1)
+
     def test_settings_update_returns_setup_state(self) -> None:
         """Verify that /auth/settings also returns setupState in response."""
         request = _make_request()
