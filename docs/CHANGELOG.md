@@ -79,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] Web 管理员登录新增可选 TOTP MFA，支持签名短期 challenge、一次性恢复码、设置页绑定/禁用/重置恢复码和 `python -m src.auth reset_mfa`。
 - [修复] MFA 已启用时关闭管理员认证必须同时验证当前密码和 MFA，并修复 MFA 启用/禁用时 session secret 轮换失败后的状态回滚。
 - [文档] 新增服务器代码同步脚本 `scripts/deploy_server.sh`，并补充 Docker Compose 远端更新流程与运行态文件保护说明。
+- [文档] 补充 Docker Compose 生产部署建议：Web/API 与定时分析分容器运行，并说明 `analyzer` 启动和 `SCHEDULE_RUN_IMMEDIATELY` 配置。
 
 ## [3.16.0] - 2026-05-10
 

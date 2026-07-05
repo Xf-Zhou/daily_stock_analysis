@@ -42,11 +42,17 @@ cp .env.example .env
 vim .env  # 填入真实的 API Key 等配置
 ```
 
-### 3. 一键启动
+### 3. 推荐启动方式：Web/API 与定时任务分容器
 
 ```bash
-# 构建并启动（同时包含定时分析和 Web 界面服务）
-docker-compose -f ./docker/docker-compose.yml up -d
+# 只启动 Web/API 服务
+docker-compose -f ./docker/docker-compose.yml up -d server
+
+# 需要每日自动分析时，再启动定时任务容器
+docker-compose -f ./docker/docker-compose.yml up -d analyzer
+
+# 同时启动 Web/API 与定时任务
+docker-compose -f ./docker/docker-compose.yml up -d server analyzer
 
 # 查看日志
 docker-compose -f ./docker/docker-compose.yml logs -f
@@ -58,6 +64,23 @@ docker-compose -f ./docker/docker-compose.yml ps
 启动成功后，在浏览器输入 `http://服务器公网IP:8000` 即可打开 Web 管理界面。如果打不开，记得先在云服务器控制台的「安全组」里放行 8000 端口。
 
 > 不知道怎么访问？→ [云服务器 Web 界面访问指南](deploy-webui-cloud.md)
+
+推荐生产部署使用两个容器：
+
+- `stock-server`：只负责 Web/API。
+- `stock-analyzer`：只负责定时分析。
+
+这样 Web 服务重启不会误触发分析，定时任务异常也不会直接拖下线 Web 管理界面。若仅需手动在 Web 里点击分析，可以只启动 `server`。
+
+启用定时任务前，建议在 `.env` 中设置：
+
+```env
+SCHEDULE_ENABLED=true
+SCHEDULE_TIME=18:00
+SCHEDULE_RUN_IMMEDIATELY=false
+```
+
+`SCHEDULE_RUN_IMMEDIATELY=false` 表示启动 `analyzer` 时不立刻跑一次分析，而是等待下一次 `SCHEDULE_TIME`。如果你希望容器启动后马上分析一次，可以改为 `true`。
 
 ### 4. 常用管理命令
 
@@ -71,9 +94,9 @@ docker-compose -f ./docker/docker-compose.yml restart
 # 更新代码后重新部署
 git pull
 docker-compose -f ./docker/docker-compose.yml build --no-cache
-docker-compose -f ./docker/docker-compose.yml up -d
+docker-compose -f ./docker/docker-compose.yml up -d server analyzer
 
-# 进入容器调试
+# 进入定时任务容器调试
 docker-compose -f ./docker/docker-compose.yml exec -u dsa stock-analyzer bash
 
 # 手动执行一次分析
@@ -82,7 +105,11 @@ docker-compose -f ./docker/docker-compose.yml exec -u dsa stock-analyzer python 
 
 ### 5. 使用脚本同步代码更新
 
-仓库提供 `scripts/deploy_server.sh` 用于从本机把当前代码同步到已有 Docker Compose 服务器，并在远端执行 `docker compose up -d --build server`。
+仓库提供 `scripts/deploy_server.sh` 用于从本机把当前代码同步到已有 Docker Compose 服务器，并在远端执行 `docker compose up -d --build server`。脚本默认只重建 Web/API 服务；定时任务容器会继续按当前镜像运行。若本次更新影响了定时分析逻辑，请在脚本完成后执行：
+
+```bash
+ssh <user>@<server> 'cd /opt/daily_stock_analysis && docker compose -f docker/docker-compose.yml up -d --build analyzer'
+```
 
 脚本默认保护服务器运行态文件，不会同步或删除：
 

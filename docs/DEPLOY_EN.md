@@ -42,11 +42,17 @@ cp .env.example .env
 vim .env  # Fill in real API Keys and configuration
 ```
 
-### 3. One-Click Start
+### 3. Recommended Startup: Separate Web/API and Scheduler Containers
 
 ```bash
-# Build and start
-docker-compose -f ./docker/docker-compose.yml up -d
+# Start only the Web/API service
+docker-compose -f ./docker/docker-compose.yml up -d server
+
+# Start the scheduled-analysis container when daily automatic analysis is needed
+docker-compose -f ./docker/docker-compose.yml up -d analyzer
+
+# Start both Web/API and scheduled analysis
+docker-compose -f ./docker/docker-compose.yml up -d server analyzer
 
 # View logs
 docker-compose -f ./docker/docker-compose.yml logs -f
@@ -54,6 +60,23 @@ docker-compose -f ./docker/docker-compose.yml logs -f
 # View running status
 docker-compose -f ./docker/docker-compose.yml ps
 ```
+
+Recommended production deployments use two containers:
+
+- `stock-server`: Web/API only.
+- `stock-analyzer`: scheduled analysis only.
+
+This keeps Web restarts from accidentally triggering analysis, and scheduler failures from directly taking the Web console offline. If you only need manual analysis from the Web UI, starting `server` is enough.
+
+Before enabling scheduled analysis, set the following in `.env`:
+
+```env
+SCHEDULE_ENABLED=true
+SCHEDULE_TIME=18:00
+SCHEDULE_RUN_IMMEDIATELY=false
+```
+
+`SCHEDULE_RUN_IMMEDIATELY=false` means the `analyzer` container waits for the next `SCHEDULE_TIME` instead of running analysis immediately on startup. Set it to `true` if you want one analysis run as soon as the container starts.
 
 ### 4. Common Management Commands
 
@@ -67,9 +90,9 @@ docker-compose -f ./docker/docker-compose.yml restart
 # Redeploy after code update
 git pull
 docker-compose -f ./docker/docker-compose.yml build --no-cache
-docker-compose -f ./docker/docker-compose.yml up -d
+docker-compose -f ./docker/docker-compose.yml up -d server analyzer
 
-# Enter container for debugging
+# Enter the scheduler container for debugging
 docker-compose -f ./docker/docker-compose.yml exec -u dsa stock-analyzer bash
 
 # Manually run analysis once
@@ -78,7 +101,11 @@ docker-compose -f ./docker/docker-compose.yml exec -u dsa stock-analyzer python 
 
 ### 5. Sync Code Updates with the Deploy Script
 
-The repository includes `scripts/deploy_server.sh` for syncing the current local checkout to an existing Docker Compose server and running `docker compose up -d --build server` remotely.
+The repository includes `scripts/deploy_server.sh` for syncing the current local checkout to an existing Docker Compose server and running `docker compose up -d --build server` remotely. By default, the script rebuilds only the Web/API service; the scheduler container keeps running with the current image. If the update changes scheduled-analysis logic, run this after the script completes:
+
+```bash
+ssh <user>@<server> 'cd /opt/daily_stock_analysis && docker compose -f docker/docker-compose.yml up -d --build analyzer'
+```
 
 By default, the script protects server runtime state and will not sync or delete:
 
