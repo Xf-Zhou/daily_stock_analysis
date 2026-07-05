@@ -80,14 +80,78 @@ docker-compose -f ./docker/docker-compose.yml exec -u dsa stock-analyzer bash
 docker-compose -f ./docker/docker-compose.yml exec -u dsa stock-analyzer python main.py --no-notify
 ```
 
-### 5. 数据持久化
+### 5. 使用脚本同步代码更新
+
+仓库提供 `scripts/deploy_server.sh` 用于从本机把当前代码同步到已有 Docker Compose 服务器，并在远端执行 `docker compose up -d --build server`。
+
+脚本默认保护服务器运行态文件，不会同步或删除：
+
+- `.env`
+- `data/*.db*`
+- `data/cache/`
+- `data/*.lock*`
+- `data/.admin_*`
+- `data/.session_secret`
+- `docker/docker-compose.yml`
+- `logs/`
+- `reports/`
+
+本机执行：
+
+```bash
+DSA_DEPLOY_HOST=<server-ip-or-domain> \
+DSA_DEPLOY_USER=<ssh-user> \
+DSA_DEPLOY_KEY=~/.ssh/<deploy-key> \
+DSA_DEPLOY_PATH=/opt/daily_stock_analysis \
+scripts/deploy_server.sh
+```
+
+如果远端用户需要通过 sudo 调用 Docker：
+
+```bash
+DSA_DEPLOY_HOST=<server-ip-or-domain> \
+DSA_DEPLOY_USER=<ssh-user> \
+DSA_DEPLOY_KEY=~/.ssh/<deploy-key> \
+DSA_DEPLOY_PATH=/opt/daily_stock_analysis \
+DSA_REMOTE_COMPOSE_CMD='sudo docker compose' \
+scripts/deploy_server.sh
+```
+
+预览将同步的文件但不重建服务：
+
+```bash
+DSA_DEPLOY_HOST=<server-ip-or-domain> \
+DSA_DEPLOY_USER=<ssh-user> \
+DSA_DEPLOY_KEY=~/.ssh/<deploy-key> \
+DSA_DEPLOY_PATH=/opt/daily_stock_analysis \
+DSA_DEPLOY_DRY_RUN=true \
+scripts/deploy_server.sh
+```
+
+仅首次部署或确实要覆盖远端 `.env` 时，才显式设置：
+
+```bash
+DSA_DEPLOY_SYNC_ENV=true
+```
+
+仅当你确实要覆盖远端 Compose 文件时，才显式设置：
+
+```bash
+DSA_DEPLOY_SYNC_COMPOSE=true
+```
+
+这对已有反向代理或端口绑定定制的服务器尤其重要。例如服务器上的 Compose 可能把应用端口绑定到 `127.0.0.1`，再由 Caddy / Nginx 对外提供 HTTPS。
+
+常规代码更新不要同步 `.env`，避免覆盖服务器上的管理员密码、MFA、API Key、数据库路径和通知配置。
+
+### 6. 数据持久化
 
 数据自动保存在宿主机目录：
 - `./data/` - 数据库文件
 - `./logs/` - 日志文件
 - `./reports/` - 分析报告
 
-### 6. 权限说明
+### 7. 权限说明
 
 Docker 镜像启动入口会自动创建并修复 `./data`、`./logs`、`./reports` 对应挂载目录的权限，然后降权为非 root 用户 (`dsa`, UID 1000) 运行应用。普通部署不需要手动 `chown` / `chmod`。
 

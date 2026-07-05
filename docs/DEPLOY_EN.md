@@ -76,14 +76,78 @@ docker-compose -f ./docker/docker-compose.yml exec -u dsa stock-analyzer bash
 docker-compose -f ./docker/docker-compose.yml exec -u dsa stock-analyzer python main.py --no-notify
 ```
 
-### 5. Data Persistence
+### 5. Sync Code Updates with the Deploy Script
+
+The repository includes `scripts/deploy_server.sh` for syncing the current local checkout to an existing Docker Compose server and running `docker compose up -d --build server` remotely.
+
+By default, the script protects server runtime state and will not sync or delete:
+
+- `.env`
+- `data/*.db*`
+- `data/cache/`
+- `data/*.lock*`
+- `data/.admin_*`
+- `data/.session_secret`
+- `docker/docker-compose.yml`
+- `logs/`
+- `reports/`
+
+Run from your local checkout:
+
+```bash
+DSA_DEPLOY_HOST=<server-ip-or-domain> \
+DSA_DEPLOY_USER=<ssh-user> \
+DSA_DEPLOY_KEY=~/.ssh/<deploy-key> \
+DSA_DEPLOY_PATH=/opt/daily_stock_analysis \
+scripts/deploy_server.sh
+```
+
+If the remote user needs sudo for Docker:
+
+```bash
+DSA_DEPLOY_HOST=<server-ip-or-domain> \
+DSA_DEPLOY_USER=<ssh-user> \
+DSA_DEPLOY_KEY=~/.ssh/<deploy-key> \
+DSA_DEPLOY_PATH=/opt/daily_stock_analysis \
+DSA_REMOTE_COMPOSE_CMD='sudo docker compose' \
+scripts/deploy_server.sh
+```
+
+Preview synced files without rebuilding the remote service:
+
+```bash
+DSA_DEPLOY_HOST=<server-ip-or-domain> \
+DSA_DEPLOY_USER=<ssh-user> \
+DSA_DEPLOY_KEY=~/.ssh/<deploy-key> \
+DSA_DEPLOY_PATH=/opt/daily_stock_analysis \
+DSA_DEPLOY_DRY_RUN=true \
+scripts/deploy_server.sh
+```
+
+Only set the following for first-time deployment or when you intentionally want to overwrite the remote `.env`:
+
+```bash
+DSA_DEPLOY_SYNC_ENV=true
+```
+
+Only set the following when you intentionally want to overwrite the remote Compose file:
+
+```bash
+DSA_DEPLOY_SYNC_COMPOSE=true
+```
+
+This matters for servers with reverse proxy or port-binding customizations. For example, the remote Compose file may bind the app port to `127.0.0.1` and expose HTTPS through Caddy or Nginx.
+
+For normal code updates, do not sync `.env`; otherwise you may overwrite the server's admin password, MFA state, API keys, database path, or notification settings.
+
+### 6. Data Persistence
 
 Data is automatically saved to host directories:
 - `./data/` - Database files
 - `./logs/` - Log files
 - `./reports/` - Analysis reports
 
-### 6. Permissions
+### 7. Permissions
 
 The Docker image startup entrypoint automatically creates and fixes ownership for the mounted `./data`, `./logs`, and `./reports` directories, then drops privileges to the non-root `dsa` user (UID 1000). Normal deployments do not require manual host-side `chown` / `chmod`.
 
