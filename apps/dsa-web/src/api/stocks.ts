@@ -122,10 +122,10 @@ export const stocksApi = {
     throw new Error('请提供文件或粘贴文本');
   },
 
-  async getRankings(params: StockRankingsParams): Promise<StockRankingsResponse> {
+  async getRankings(params: StockRankingsParams, signal?: AbortSignal): Promise<StockRankingsResponse> {
     const response = await apiClient.get<Record<string, unknown>>(
       '/api/v1/stocks/rankings',
-      { params }
+      { params, signal }
     );
     return toCamelCase<StockRankingsResponse>(response.data);
   },

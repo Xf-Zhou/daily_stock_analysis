@@ -5,7 +5,6 @@ import {
   BarChart3,
   ChartCandlestick,
   LineChart,
-  Loader2,
   MessageSquareQuote,
   Play,
   Search,
@@ -15,7 +14,6 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { analysisApi, DuplicateTaskError } from '../api/analysis';
-import { systemConfigApi, SystemConfigConflictError } from '../api/systemConfig';
 import {
   stocksApi,
   type RankingDirection,
@@ -25,18 +23,12 @@ import {
 } from '../api/stocks';
 import { AppPage, Badge, Button, EmptyState, InlineAlert, Input, Pagination, Select, Tooltip } from '../components/common';
 import { StockKLineDrawer } from '../components/stocks/StockKLineDrawer';
+import { WatchlistStarButton } from '../components/stocks/WatchlistStarButton';
+import { useWatchlistConfig } from '../hooks/useWatchlistConfig';
 import { useStockIndex } from '../hooks/useStockIndex';
 import type { Market } from '../types/stockIndex';
 import { searchStocks } from '../utils/searchStocks';
 import { cn } from '../utils/cn';
-import {
-  addWatchlistCode,
-  formatStockListValue,
-  isSameStockCode,
-  parseStockListValue,
-  removeWatchlistCode,
-  type WatchlistMarketResolver,
-} from '../utils/watchlist';
 
 const UNCATEGORIZED_INDUSTRY = '__uncategorized__';
 const STOCK_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
@@ -124,61 +116,11 @@ const DiscoverPage: React.FC = () => {
   const [stockPage, setStockPage] = useState(1);
   const [stockPageSize, setStockPageSize] = useState(DEFAULT_STOCK_PAGE_SIZE);
   const [kLineStock, setKLineStock] = useState<{ code: string; name: string } | null>(null);
-  const [watchlistCodes, setWatchlistCodes] = useState<string[]>([]);
-  const [watchlistConfigVersion, setWatchlistConfigVersion] = useState('');
-  const [watchlistMaskToken, setWatchlistMaskToken] = useState('');
-  const [watchlistLoading, setWatchlistLoading] = useState(true);
-  const [watchlistError, setWatchlistError] = useState<string | null>(null);
-  const [watchlistSavingCode, setWatchlistSavingCode] = useState<string | null>(null);
   const [watchlistOnly, setWatchlistOnly] = useState(false);
+  const watchlist = useWatchlistConfig({ index });
 
   const activeRanking = RANKING_TABS.find((tab) => tab.key === rankingKey) ?? RANKING_TABS[0];
-  const watchlistSaving = Boolean(watchlistSavingCode);
-  const watchlistDisabled = watchlistLoading || watchlistSaving || Boolean(watchlistError) || !watchlistConfigVersion;
-  const watchlistFilterDisabled = watchlistLoading || watchlistSaving || (!watchlistConfigVersion && !watchlistOnly);
-
-  const loadWatchlistConfig = useCallback(async () => {
-    setWatchlistLoading(true);
-    try {
-      const payload = await systemConfigApi.getConfig(false);
-      const stockList = payload.items.find((item) => item.key === 'STOCK_LIST')?.value ?? '';
-      setWatchlistCodes(parseStockListValue(stockList));
-      setWatchlistConfigVersion(payload.configVersion);
-      setWatchlistMaskToken(payload.maskToken);
-      setWatchlistError(null);
-      return payload;
-    } catch (requestError) {
-      const message = getErrorMessage(requestError, '无法加载自选股配置');
-      setWatchlistError(message);
-      return null;
-    } finally {
-      setWatchlistLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadWatchlistConfig();
-  }, [loadWatchlistConfig]);
-
-  const isStockWatchlisted = useCallback((stockCode: string, stockMarket?: Market | null) => (
-    watchlistCodes.some((code) => isSameStockCode(code, stockCode, stockMarket))
-  ), [watchlistCodes]);
-
-  const resolveWatchlistCodeMarket = useCallback<WatchlistMarketResolver>((stockCode) => {
-    const trimmed = stockCode.trim();
-    if (!trimmed) {
-      return undefined;
-    }
-    const matched = index.find((item) => (
-      item.active
-      && item.assetType === 'stock'
-      && (
-        isSameStockCode(trimmed, item.canonicalCode, item.market)
-        || isSameStockCode(trimmed, item.displayCode, item.market)
-      )
-    ));
-    return matched?.market;
-  }, [index]);
+  const watchlistFilterDisabled = watchlist.loading || watchlist.saving || (!watchlist.hasConfig && !watchlistOnly);
 
   const marketStocks = useMemo(
     () => index.filter((item) => item.active && item.assetType === 'stock' && item.market === market),
@@ -231,75 +173,19 @@ const DiscoverPage: React.FC = () => {
     })();
 
     if (watchlistOnly) {
-      return industryFiltered.filter((item) => isStockWatchlisted(item.canonicalCode, item.market));
+      return industryFiltered.filter((item) => watchlist.isWatchlisted(item.canonicalCode, item.market));
     }
     return industryFiltered;
-  }, [industry, isStockWatchlisted, keywordFilteredStocks, watchlistOnly]);
+  }, [industry, keywordFilteredStocks, watchlist, watchlistOnly]);
 
   useEffect(() => {
     setStockPage(1);
   }, [industry, keyword, market, watchlistOnly]);
 
   const handleToggleWatchlist = useCallback(async (stockCode: string, stockName: string, stockMarket?: Market | null) => {
-    if (watchlistDisabled || watchlistSavingCode) {
-      return;
-    }
-    const isStarred = isStockWatchlisted(stockCode, stockMarket);
-    const nextCodes = isStarred
-      ? removeWatchlistCode(watchlistCodes, stockCode, stockMarket, resolveWatchlistCodeMarket)
-      : addWatchlistCode(watchlistCodes, stockCode, stockMarket, resolveWatchlistCodeMarket);
-    const nextValue = formatStockListValue(nextCodes);
-
-    setWatchlistSavingCode(stockCode);
     setActionNotice(null);
-    try {
-      const result = await systemConfigApi.update({
-        configVersion: watchlistConfigVersion,
-        maskToken: watchlistMaskToken,
-        reloadNow: true,
-        items: [{ key: 'STOCK_LIST', value: nextValue }],
-      });
-      setWatchlistCodes(nextCodes);
-      if (result.configVersion) {
-        setWatchlistConfigVersion(result.configVersion);
-      }
-      setActionNotice({
-        variant: 'success',
-        title: isStarred ? '已移出自选' : '已加入自选',
-        message: isStarred ? `${stockName} 已从 STOCK_LIST 移除` : `${stockName} 已追加到 STOCK_LIST`,
-      });
-    } catch (requestError) {
-      if (requestError instanceof SystemConfigConflictError) {
-        await loadWatchlistConfig();
-        setActionNotice({
-          variant: 'warning',
-          title: '自选配置已更新',
-          message: '配置已被其他操作更新，请重试本次自选操作。',
-        });
-      } else {
-        setActionNotice({
-          variant: 'danger',
-          title: '自选保存失败',
-          message: getErrorMessage(requestError, '暂时无法保存自选股'),
-        });
-      }
-    } finally {
-      setWatchlistSavingCode(null);
-    }
-  }, [
-    isStockWatchlisted,
-    loadWatchlistConfig,
-    resolveWatchlistCodeMarket,
-    watchlistCodes,
-    watchlistConfigVersion,
-    watchlistDisabled,
-    watchlistMaskToken,
-    watchlistSavingCode,
-  ]);
-
-  const isWatchlistButtonSaving = useCallback((stockCode: string, stockMarket?: Market | null) => (
-    watchlistSavingCode ? isSameStockCode(watchlistSavingCode, stockCode, stockMarket) : false
-  ), [watchlistSavingCode]);
+    await watchlist.toggleWatchlist(stockCode, stockName, stockMarket);
+  }, [watchlist]);
 
   const coverage = useMemo(() => {
     const denominator = keywordFilteredStocks.length;
@@ -487,15 +373,15 @@ const DiscoverPage: React.FC = () => {
         />
       ) : null}
 
-      {watchlistError ? (
+      {watchlist.error ? (
         <InlineAlert
           variant="warning"
           title="自选配置不可用"
-          message={`${watchlistError}。发现页仍可浏览、分析、问股和查看 K 线。`}
+          message={`${watchlist.error}。发现页仍可浏览、分析、问股和查看 K 线。`}
         />
       ) : null}
 
-      <FloatingActionToast notice={actionNotice} />
+      <FloatingActionToast notice={actionNotice ?? watchlist.notice} />
 
       <section className="glass-panel-lg px-4 py-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -545,9 +431,9 @@ const DiscoverPage: React.FC = () => {
                 onAsk={handleAsk}
                 onOpenKLine={handleOpenKLine}
                 onToggleWatchlist={handleToggleWatchlist}
-                isWatchlisted={isStockWatchlisted(item.code, item.market)}
-                watchlistDisabled={watchlistDisabled}
-                watchlistSaving={isWatchlistButtonSaving(item.code, item.market)}
+                isWatchlisted={watchlist.isWatchlisted(item.code, item.market)}
+                watchlistDisabled={watchlist.disabled}
+                watchlistSaving={watchlist.isSavingStock(item.code, item.market)}
                 analyzingCode={analyzingCode}
               />
             ))
@@ -622,9 +508,9 @@ const DiscoverPage: React.FC = () => {
                         <div className="flex justify-end gap-1.5">
                           <WatchlistStarButton
                             stockName={item.nameZh}
-                            isStarred={isStockWatchlisted(item.canonicalCode, item.market)}
-                            disabled={watchlistDisabled}
-                            isSaving={isWatchlistButtonSaving(item.canonicalCode, item.market)}
+                            isStarred={watchlist.isWatchlisted(item.canonicalCode, item.market)}
+                            disabled={watchlist.disabled}
+                            isSaving={watchlist.isSavingStock(item.canonicalCode, item.market)}
                             onClick={() => void handleToggleWatchlist(item.canonicalCode, item.nameZh, item.market)}
                           />
                           <Tooltip content="查看 K 线">
@@ -733,54 +619,6 @@ const FloatingActionToast: React.FC<FloatingActionToastProps> = ({ notice }) => 
         <div className="mt-1 text-sm leading-5 opacity-90">{notice.message}</div>
       </div>
     </div>
-  );
-};
-
-type WatchlistStarButtonProps = {
-  stockName: string;
-  isStarred: boolean;
-  disabled: boolean;
-  isSaving: boolean;
-  size?: 'sm' | 'xsm';
-  onClick: () => void;
-};
-
-const WatchlistStarButton: React.FC<WatchlistStarButtonProps> = ({
-  stockName,
-  isStarred,
-  disabled,
-  isSaving,
-  size = 'sm',
-  onClick,
-}) => {
-  const label = isStarred ? `从自选移除 ${stockName}` : `加入自选 ${stockName}`;
-  const iconSize = size === 'sm' ? 'h-4 w-4' : 'h-3.5 w-3.5';
-  const buttonSize = size === 'sm' ? 'h-9 w-9 rounded-lg' : 'h-6 w-6 rounded-lg';
-
-  return (
-    <Tooltip content={isStarred ? '移出自选' : '加入自选'}>
-      <button
-        type="button"
-        aria-label={label}
-        disabled={disabled}
-        onClick={onClick}
-        className={cn(
-          'inline-flex shrink-0 items-center justify-center border transition-all',
-          'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan/15',
-          'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
-          buttonSize,
-          isStarred
-            ? 'border-warning/30 bg-warning/12 text-warning hover:bg-warning/18'
-            : 'border-transparent bg-transparent text-secondary-text hover:bg-hover hover:text-foreground'
-        )}
-      >
-        {isSaving ? (
-          <Loader2 className={cn(iconSize, 'animate-spin')} />
-        ) : (
-          <Star className={iconSize} fill={isStarred ? 'currentColor' : 'none'} />
-        )}
-      </button>
-    </Tooltip>
   );
 };
 

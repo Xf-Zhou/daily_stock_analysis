@@ -15,12 +15,13 @@ class TestSelectionSourceConstants:
     def test_selection_sources_tuple(self):
         """Test that SELECTION_SOURCES is a tuple with expected values"""
         assert isinstance(SELECTION_SOURCES, tuple)
-        assert len(SELECTION_SOURCES) == 5
+        assert len(SELECTION_SOURCES) == 6
         assert "manual" in SELECTION_SOURCES
         assert "autocomplete" in SELECTION_SOURCES
         assert "import" in SELECTION_SOURCES
         assert "image" in SELECTION_SOURCES
         assert "discover" in SELECTION_SOURCES
+        assert "candidate_pool" in SELECTION_SOURCES
 
     def test_selection_sources_order(self):
         """Test that selection sources are in expected order"""
@@ -29,6 +30,7 @@ class TestSelectionSourceConstants:
         assert SELECTION_SOURCES[2] == "import"
         assert SELECTION_SOURCES[3] == "image"
         assert SELECTION_SOURCES[4] == "discover"
+        assert SELECTION_SOURCES[5] == "candidate_pool"
 
     def test_selection_sources_unique(self):
         """Test that selection source values are unique"""
@@ -205,6 +207,8 @@ class TestSelectionSourceBusinessLogic:
         assert "image" in SELECTION_SOURCES
         # Stock discovery page
         assert "discover" in SELECTION_SOURCES
+        # Candidate pool page
+        assert "candidate_pool" in SELECTION_SOURCES
 
     def test_no_redundant_sources(self):
         """Test that there are no redundant or duplicate selection sources"""
@@ -215,6 +219,7 @@ class TestSelectionSourceBusinessLogic:
             "import": "User uses batch import function",
             "image": "User uses image recognition function",
             "discover": "User chooses a stock from the discovery page",
+            "candidate_pool": "User chooses a stock from the candidate pool page",
         }
 
         assert len(SELECTION_SOURCES) == len(unique_patterns)
@@ -276,6 +281,7 @@ class TestSelectionSourceDocumentation:
             "import": "User batch adds stocks through import function",
             "image": "User adds stocks through image recognition function",
             "discover": "User adds stocks from market, industry or keyword discovery",
+            "candidate_pool": "User starts analysis from the candidate pool page",
         }
 
         for source in SELECTION_SOURCES:
@@ -307,6 +313,10 @@ class TestSelectionSourceDocumentation:
             "discover": [
                 "User clicks analyze from the stock discovery page",
                 "User starts analysis from a market or industry ranking",
+            ],
+            "candidate_pool": [
+                "User clicks analyze from the candidate pool page",
+                "User starts analysis from a rule-scored candidate list",
             ],
         }
 

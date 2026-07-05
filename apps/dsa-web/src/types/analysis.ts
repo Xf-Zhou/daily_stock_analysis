@@ -5,7 +5,7 @@
 
 // ============ Request Types ============
 
-export type SelectionSource = 'manual' | 'autocomplete' | 'import' | 'image' | 'discover';
+export type SelectionSource = 'manual' | 'autocomplete' | 'import' | 'image' | 'discover' | 'candidate_pool';
 
 export interface AnalysisRequest {
   stockCode?: string;

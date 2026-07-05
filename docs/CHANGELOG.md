@@ -80,6 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] MFA 已启用时关闭管理员认证必须同时验证当前密码和 MFA，并修复 MFA 启用/禁用时 session secret 轮换失败后的状态回滚。
 - [文档] 新增服务器代码同步脚本 `scripts/deploy_server.sh`，并补充 Docker Compose 远端更新流程与运行态文件保护说明。
 - [文档] 补充 Docker Compose 生产部署建议：Web/API 与定时分析分容器运行，并说明 `analyzer` 启动和 `SCHEDULE_RUN_IMMEDIATELY` 配置。
+- [新功能] Web 新增「候选」页，基于静态股票索引和行情榜单进行规则评分，支持按市场/行业/关键词/模式发现推荐关注候选并进入自选、K 线、分析和问股。
+- [改进] 股票发现与候选池共用自选股星标读写组件，并新增 `candidate_pool` 分析来源，避免候选页提交分析被来源校验拦截。
+- [测试] 增加候选池评分、候选页请求降级、侧边栏入口、自选复用和 `candidate_pool` 来源校验测试。
 
 ## [3.16.0] - 2026-05-10
 

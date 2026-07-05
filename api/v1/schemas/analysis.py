@@ -63,7 +63,7 @@ class AnalyzeRequest(BaseModel):
     )
     selection_source: Optional[str] = Field(
         None,
-        description="股票选择来源：manual(手动输入) | autocomplete(自动补全) | import(导入) | image(图片识别) | discover(股票发现)",
+        description="股票选择来源：manual(手动输入) | autocomplete(自动补全) | import(导入) | image(图片识别) | discover(股票发现) | candidate_pool(候选池)",
         pattern=SELECTION_SOURCE_PATTERN,
         example="autocomplete"
     )
@@ -256,7 +256,7 @@ class TaskStatus(BaseModel):
     original_query: Optional[str] = Field(None, description="用户原始输入")
     selection_source: Optional[str] = Field(
         None,
-        description="选择来源",
+        description="选择来源：manual/autocomplete/import/image/discover/candidate_pool",
         pattern=SELECTION_SOURCE_PATTERN,
     )
     
@@ -297,7 +297,7 @@ class TaskInfo(BaseModel):
     original_query: Optional[str] = Field(None, description="用户原始输入")
     selection_source: Optional[str] = Field(
         None,
-        description="选择来源",
+        description="选择来源：manual/autocomplete/import/image/discover/candidate_pool",
         pattern=SELECTION_SOURCE_PATTERN,
     )
     

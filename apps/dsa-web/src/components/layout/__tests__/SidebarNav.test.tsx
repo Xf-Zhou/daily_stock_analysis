@@ -27,6 +27,16 @@ vi.mock('../../theme/ThemeToggle', () => ({
 }));
 
 describe('SidebarNav', () => {
+  it('renders the candidate pool navigation entry', () => {
+    render(
+      <MemoryRouter initialEntries={['/candidates']}>
+        <SidebarNav />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('link', { name: '候选' })).toHaveAttribute('href', '/candidates');
+  });
+
   it('shows the shared completion badge only when chat completion is pending', () => {
     completionBadgeState.value = true;
 
