@@ -35,6 +35,8 @@ import { searchStocks } from '../utils/searchStocks';
 
 const UNCATEGORIZED_INDUSTRY = '__uncategorized__';
 const PAGE_SIZE = 20;
+const RANKING_CACHE_TTL_MS = 5 * 60 * 1000;
+const RANKING_CACHE_PREFIX = 'dsa:candidate-rankings:v1';
 
 type CandidateMarket = Extract<Market, 'CN' | 'BSE' | 'HK' | 'US'>;
 
@@ -94,6 +96,11 @@ const QUOTE_STATUS_META: Record<CandidateQuoteStatus, { label: string; variant: 
 
 type ActionNotice = WatchlistNotice;
 
+type CandidateRankingCachePayload = {
+  cachedAt: number;
+  signals: CandidateRankingSignal[];
+};
+
 const formatNumber = (value?: number | null, options?: Intl.NumberFormatOptions) => {
   if (value === undefined || value === null || Number.isNaN(value)) return '-';
   return new Intl.NumberFormat('zh-CN', options).format(value);
@@ -124,6 +131,39 @@ const getErrorMessage = (error: unknown, fallback: string) => {
 };
 
 let rankingRequestSeq = 0;
+
+const buildRankingCacheKey = (market: CandidateMarket, industry: string, mode: CandidateMode) => (
+  `${RANKING_CACHE_PREFIX}:${market}:${encodeURIComponent(industry)}:${mode}`
+);
+
+const readRankingCache = (cacheKey: string): CandidateRankingSignal[] | null => {
+  try {
+    const raw = window.sessionStorage.getItem(cacheKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CandidateRankingCachePayload>;
+    const cachedAt = parsed.cachedAt;
+    if (typeof cachedAt !== 'number' || !Number.isFinite(cachedAt) || !Array.isArray(parsed.signals)) return null;
+    if (Date.now() - cachedAt > RANKING_CACHE_TTL_MS) return null;
+    return parsed.signals.map((signal) => ({
+      ...signal,
+      status: signal.items.length > 0 ? 'stale' : signal.status,
+    }));
+  } catch {
+    return null;
+  }
+};
+
+const writeRankingCache = (cacheKey: string, signals: CandidateRankingSignal[]) => {
+  try {
+    const payload: CandidateRankingCachePayload = {
+      cachedAt: Date.now(),
+      signals,
+    };
+    window.sessionStorage.setItem(cacheKey, JSON.stringify(payload));
+  } catch {
+    // Best-effort UI cache only; ignore storage quota/private mode failures.
+  }
+};
 
 const CandidatePoolPage: React.FC = () => {
   const navigate = useNavigate();
@@ -214,6 +254,12 @@ const CandidatePoolPage: React.FC = () => {
       return;
     }
 
+    const cacheKey = buildRankingCacheKey(market, industry, mode);
+    const cachedSignals = readRankingCache(cacheKey);
+    if (cachedSignals) {
+      setSignals(cachedSignals);
+    }
+
     const controller = new AbortController();
     requestAbortRef.current = controller;
     const requestId = ++rankingRequestSeq;
@@ -251,6 +297,7 @@ const CandidatePoolPage: React.FC = () => {
 
       if (requestId === rankingRequestSeq && !controller.signal.aborted) {
         setSignals(loadedSignals);
+        writeRankingCache(cacheKey, loadedSignals);
       }
     };
 

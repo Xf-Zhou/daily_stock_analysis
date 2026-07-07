@@ -90,6 +90,22 @@ describe('candidateScoring', () => {
     expect(watchlisted?.score).toBeLessThanOrEqual(fresh?.score ?? 0);
   });
 
+  it('uses real popularity for static ordering without adding a static reason for zero', () => {
+    const result = buildCandidatePool({
+      stocks: [
+        stock('000001.SZ', '平安银行', 0),
+        stock('600519.SH', '贵州茅台', 100),
+      ],
+      mode: 'balanced',
+      signals: [],
+      isWatchlisted: () => false,
+    });
+
+    expect(result.items.map((item) => item.code)).toEqual(['600519.SH', '000001.SZ']);
+    expect(result.items.find((item) => item.code === '600519.SH')?.reasons).toContain('静态热度');
+    expect(result.items.find((item) => item.code === '000001.SZ')?.reasons).not.toContain('静态热度');
+  });
+
   it('aggregates ranking statuses without discarding usable signals', () => {
     const partial = buildCandidatePool({
       stocks: [stock('600519.SH', '贵州茅台', 100)],

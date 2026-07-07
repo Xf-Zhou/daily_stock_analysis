@@ -25,6 +25,7 @@ from generate_index_from_csv import (
     generate_pinyin,
     compress_index,
     build_stock_index,
+    load_popularity_scores,
     load_tushare_data,
     load_akshare_data,
 )
@@ -382,6 +383,48 @@ class TestOutputFormat:
         assert index[0]["industrySource"] == "tushare"
         assert compressed[0][10] == "银行"
         assert compressed[0][11] == "tushare"
+
+    def test_build_stock_index_reads_popularity_cache(self, tmp_path):
+        cache_path = tmp_path / "stock_popularity_cache.json"
+        cache_path.write_text(json.dumps({
+            "version": 1,
+            "updated_at": "2026-07-05T00:00:00+00:00",
+            "ttl_hours": 72,
+            "max_stale_days": 30,
+            "entries": {
+                "CN:000001.SZ": {
+                    "code": "000001.SZ",
+                    "market": "CN",
+                    "score": 77,
+                    "status": "fresh",
+                    "source": "test",
+                    "updated_at": "2026-07-05T00:00:00+00:00",
+                    "metrics": {"market_cap": 100, "amount": 10},
+                }
+            }
+        }), encoding="utf-8")
+        stocks = [{
+            "ts_code": "000001.SZ",
+            "symbol": "000001",
+            "name": "平安银行",
+            "market": "CN",
+        }]
+
+        index = build_stock_index(stocks, popularity_scores=load_popularity_scores(cache_path))
+
+        assert index[0]["popularity"] == 77
+
+    def test_build_stock_index_defaults_missing_popularity_to_zero(self):
+        stocks = [{
+            "ts_code": "000001.SZ",
+            "symbol": "000001",
+            "name": "平安银行",
+            "market": "CN",
+        }]
+
+        index = build_stock_index(stocks, popularity_scores={})
+
+        assert index[0]["popularity"] == 0
 
 
 class TestIntegration:

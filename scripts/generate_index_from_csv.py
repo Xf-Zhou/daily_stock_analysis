@@ -35,6 +35,21 @@ except ImportError:
     print("[Warning] pypinyin not available, pinyin fields will be empty")
     print("[Info] Install with: pip install pypinyin")
 
+from src.services.stock_market_metrics import (
+    cache_key_for_stock,
+    get_cache_scores,
+    load_popularity_cache,
+)
+
+
+DEFAULT_POPULARITY_CACHE_PATH = Path(__file__).parent.parent / 'data' / 'stock_popularity_cache.json'
+
+
+def load_popularity_scores(cache_path: Path | None = None) -> Dict[str, int]:
+    """Load valid popularity scores from the shared offline cache."""
+    payload = load_popularity_cache(cache_path or DEFAULT_POPULARITY_CACHE_PATH)
+    return get_cache_scores(payload)
+
 
 def load_csv_data(csv_path: Path) -> List[Dict[str, Any]]:
     """
@@ -558,7 +573,10 @@ def generate_aliases(name: str, market: str) -> List[str]:
     return aliases
 
 
-def build_stock_index(stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def build_stock_index(
+    stocks: List[Dict[str, Any]],
+    popularity_scores: Optional[Dict[str, int]] = None,
+) -> List[Dict[str, Any]]:
     """
     Build the stock index.
 
@@ -569,6 +587,7 @@ def build_stock_index(stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         Stock index entries
     """
     index = []
+    scores = popularity_scores if popularity_scores is not None else load_popularity_scores()
 
     for stock in stocks:
         ts_code = stock['ts_code']
@@ -586,6 +605,8 @@ def build_stock_index(stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         # Generate aliases.
         aliases = generate_aliases(name, market)
 
+        popularity_key = cache_key_for_stock(market, ts_code)
+
         item = {
             "canonicalCode": ts_code,    # Example: 000001.SZ, AAPL
             "displayCode": symbol,       # Example: 000001, AAPL
@@ -596,7 +617,7 @@ def build_stock_index(stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "market": market,
             "assetType": "stock",
             "active": True,
-            "popularity": 100,
+            "popularity": scores.get(popularity_key, 0),
         }
         industry = (stock.get('industry') or '').strip()
         if industry:
@@ -685,7 +706,13 @@ def main():
         print("       pip install pypinyin")
 
     print("\n[2/5] 生成索引数据...")
-    index = build_stock_index(stocks)
+    popularity_scores = load_popularity_scores()
+    if popularity_scores:
+        print(f"      已加载 popularity cache：{len(popularity_scores)} 条有效分数")
+    else:
+        print("      未找到有效 popularity cache，缺失股票热度将写为 0")
+
+    index = build_stock_index(stocks, popularity_scores=popularity_scores)
     apply_industry_overrides(index, Path(__file__).parent.parent / 'data')
 
     # 输出路径

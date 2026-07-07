@@ -128,6 +128,7 @@ const createConfigResponse = (stockList: string): SystemConfigResponse => ({
 describe('CandidatePoolPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.sessionStorage.clear();
     vi.mocked(useStockIndex).mockReturnValue({
       index,
       loading: false,
@@ -313,6 +314,62 @@ describe('CandidatePoolPage', () => {
       setTimeout(resolve, 0);
     });
     expect(stocksApi.getRankings).toHaveBeenCalledTimes(3);
+  });
+
+  it('shows cached ranking signals immediately while refreshing in the background', async () => {
+    window.sessionStorage.setItem('dsa:candidate-rankings:v1:CN::balanced', JSON.stringify({
+      cachedAt: Date.now(),
+      signals: [
+        {
+          key: 'amount',
+          status: 'ok',
+          items: [
+            {
+              code: '000001.SZ',
+              name: '平安银行',
+              market: 'CN',
+              industry: '银行',
+              price: 10.88,
+              changePct: 1.6,
+              amount: 880000000,
+              volume: 6600000,
+            },
+          ],
+        },
+      ],
+    }));
+    let resolveRanking: (value: Awaited<ReturnType<typeof stocksApi.getRankings>>) => void = () => {};
+    vi.mocked(stocksApi.getRankings).mockReturnValue(new Promise((resolve) => {
+      resolveRanking = resolve;
+    }));
+
+    render(
+      <MemoryRouter>
+        <CandidatePoolPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('10.88')).toBeInTheDocument();
+    expect(screen.getByText('缓存行情')).toBeInTheDocument();
+    expect(stocksApi.getRankings).toHaveBeenCalledTimes(1);
+
+    resolveRanking({
+      status: 'ok',
+      source: 'mock',
+      updatedAt: '2026-07-05T00:00:00+08:00',
+      items: [
+        {
+          code: '600519.SH',
+          name: '贵州茅台',
+          market: 'CN',
+          industry: '白酒',
+          price: 1500,
+          changePct: 2.2,
+          amount: 300000000,
+          volume: 2000000,
+        },
+      ],
+    });
   });
 
   it('uses candidate_pool selection source when submitting analysis', async () => {

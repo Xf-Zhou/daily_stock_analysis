@@ -33,6 +33,21 @@ except ImportError:
     print("[Warning] pypinyin not available, pinyin fields will be empty")
     print("[Info] Install with: pip install pypinyin")
 
+from src.services.stock_market_metrics import (
+    cache_key_for_stock,
+    get_cache_scores,
+    load_popularity_cache,
+)
+
+
+DEFAULT_POPULARITY_CACHE_PATH = Path(__file__).parent.parent / 'data' / 'stock_popularity_cache.json'
+
+
+def load_popularity_scores(cache_path: Path | None = None) -> Dict[str, int]:
+    """Load valid popularity scores from the shared offline cache."""
+    payload = load_popularity_cache(cache_path or DEFAULT_POPULARITY_CACHE_PATH)
+    return get_cache_scores(payload)
+
 
 def normalize_name_for_pinyin(name: str) -> str:
     """
@@ -52,7 +67,9 @@ def normalize_name_for_pinyin(name: str) -> str:
     return normalized.strip() or unicodedata.normalize('NFKC', name).strip()
 
 
-def generate_stock_index_from_map() -> List[Dict[str, Any]]:
+def generate_stock_index_from_map(
+    popularity_scores: Dict[str, int] | None = None,
+) -> List[Dict[str, Any]]:
     """
     Generate index from STOCK_NAME_MAP (MVP)
 
@@ -62,6 +79,7 @@ def generate_stock_index_from_map() -> List[Dict[str, Any]]:
     from src.data.stock_mapping import STOCK_NAME_MAP
 
     index = []
+    scores = popularity_scores if popularity_scores is not None else load_popularity_scores()
 
     for code, name in STOCK_NAME_MAP.items():
         # Generate pinyin fields.
@@ -82,8 +100,10 @@ def generate_stock_index_from_map() -> List[Dict[str, Any]]:
         # Generate short aliases.
         aliases = generate_aliases(name)
 
+        canonical_code = build_canonical_code(code, market)
+
         index.append({
-            "canonicalCode": build_canonical_code(code, market),
+            "canonicalCode": canonical_code,
             "displayCode": code,
             "nameZh": name,
             "pinyinFull": pinyin_full,
@@ -92,7 +112,7 @@ def generate_stock_index_from_map() -> List[Dict[str, Any]]:
             "market": market,
             "assetType": asset_type,
             "active": True,
-            "popularity": 100,  # Default popularity
+            "popularity": scores.get(cache_key_for_stock(market, canonical_code), 0),
         })
 
     return index
@@ -280,9 +300,15 @@ def main():
     args = parser.parse_args()
 
     print("开始生成股票索引...")
+    print("[提示] generate_stock_index.py 是 legacy 入口；完整索引请优先使用 generate_index_from_csv.py。")
 
     # 生成索引（MVP：使用现有映射）
-    index = generate_stock_index_from_map()
+    popularity_scores = load_popularity_scores()
+    if popularity_scores:
+        print(f"已加载 popularity cache：{len(popularity_scores)} 条有效分数")
+    else:
+        print("未找到有效 popularity cache，缺失股票热度将写为 0")
+    index = generate_stock_index_from_map(popularity_scores=popularity_scores)
     print(f"共生成 {len(index)} 条索引")
 
     # 按市场统计

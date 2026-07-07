@@ -20,6 +20,7 @@ from src.data.stock_index_loader import (
     build_stock_index_lookup_keys,
     load_stock_index_entries,
 )
+from src.services import stock_market_metrics as market_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +241,13 @@ class StockDiscoveryService:
     ) -> BatchQuoteResult:
         if isinstance(value, BatchQuoteResult):
             return value
+        if all(hasattr(value, attr) for attr in ("df", "source", "updated_at", "status")):
+            return BatchQuoteResult(
+                df=value.df,
+                source=value.source,
+                updated_at=value.updated_at,
+                status=value.status,
+            )
         if isinstance(value, pd.DataFrame):
             return BatchQuoteResult(value, default_source, default_updated_at, "ok")
         return StockDiscoveryService._coerce_batch_result(value)
@@ -252,104 +260,14 @@ class StockDiscoveryService:
             return BatchQuoteResult(self._fetch_akshare_cn_batch_quotes(), "akshare_em", None, "ok")
 
     def _fetch_efinance_batch_quotes(self) -> pd.DataFrame:
-        import efinance as ef
-        import data_provider.efinance_fetcher as efinance_fetcher
-
-        source_key = "efinance"
-        circuit_breaker = efinance_fetcher.get_realtime_circuit_breaker()
-        if not circuit_breaker.is_available(source_key):
-            raise RuntimeError(f"{source_key} circuit breaker is open")
-
-        current_time = time.time()
-        cache = efinance_fetcher._realtime_cache
-        if cache["data"] is not None and current_time - cache["timestamp"] < cache["ttl"]:
-            return cache["data"]
-
-        fetcher = efinance_fetcher.EfinanceFetcher()
-        fetcher._set_random_user_agent()
-        fetcher._enforce_rate_limit()
-        try:
-            df = efinance_fetcher._ef_call_with_timeout(ef.stock.get_realtime_quotes)
-            circuit_breaker.record_success(source_key)
-            cache["data"] = df
-            cache["timestamp"] = current_time
-            return df
-        except FuturesTimeout as exc:
-            circuit_breaker.record_failure(source_key, "timeout")
-            raise TimeoutError("efinance batch quote timeout") from exc
-        except Exception as exc:
-            circuit_breaker.record_failure(source_key, str(exc))
-            raise
+        return market_metrics.fetch_efinance_batch_quotes()
 
     def _fetch_akshare_cn_batch_quotes(self) -> pd.DataFrame:
-        import akshare as ak
-        import data_provider.akshare_fetcher as akshare_fetcher
-
-        source_key = "akshare_em"
-        circuit_breaker = akshare_fetcher.get_realtime_circuit_breaker()
-        if not circuit_breaker.is_available(source_key):
-            raise RuntimeError(f"{source_key} circuit breaker is open")
-
-        current_time = time.time()
-        cache = akshare_fetcher._realtime_cache
-        if cache["data"] is not None and current_time - cache["timestamp"] < cache["ttl"]:
-            return cache["data"]
-
-        fetcher = akshare_fetcher.AkshareFetcher()
-        fetcher._set_random_user_agent()
-        fetcher._enforce_rate_limit()
-        try:
-            df = self._call_with_timeout(
-                ak.stock_zh_a_spot_em,
-                BATCH_SOURCE_TIMEOUT_SECONDS,
-                "ak.stock_zh_a_spot_em",
-            )
-            circuit_breaker.record_success(source_key)
-            cache["data"] = df
-            cache["timestamp"] = current_time
-            return df
-        except Exception as exc:
-            circuit_breaker.record_failure(source_key, str(exc))
-            raise
+        return market_metrics.fetch_akshare_cn_batch_quotes()
 
     def _fetch_hk_batch_quotes(self) -> BatchQuoteResult:
-        import akshare as ak
-        import data_provider.akshare_fetcher as akshare_fetcher
-
-        fetcher = akshare_fetcher.AkshareFetcher()
-        fetcher._set_random_user_agent()
-        fetcher._enforce_rate_limit()
-        circuit_breaker = akshare_fetcher.get_realtime_circuit_breaker()
-        em_key = "akshare_hk_em"
-        sina_key = "akshare_hk_sina"
-
-        if circuit_breaker.is_available(em_key):
-            try:
-                df = self._call_with_timeout(
-                    ak.stock_hk_spot_em,
-                    BATCH_SOURCE_TIMEOUT_SECONDS,
-                    "ak.stock_hk_spot_em",
-                )
-                circuit_breaker.record_success(em_key)
-                return BatchQuoteResult(df, em_key, None, "ok")
-            except Exception as em_exc:
-                circuit_breaker.record_failure(em_key, str(em_exc))
-                logger.debug("[股票发现] ak.stock_hk_spot_em 失败，尝试 stock_hk_spot: %s", em_exc)
-
-        if not circuit_breaker.is_available(sina_key):
-            raise RuntimeError(f"{sina_key} circuit breaker is open")
-
-        try:
-            df = self._call_with_timeout(
-                ak.stock_hk_spot,
-                BATCH_SOURCE_TIMEOUT_SECONDS,
-                "ak.stock_hk_spot",
-            )
-            circuit_breaker.record_success(sina_key)
-            return BatchQuoteResult(df, sina_key, None, "ok")
-        except Exception as exc:
-            circuit_breaker.record_failure(sina_key, str(exc))
-            raise
+        result = market_metrics.fetch_hk_batch_quotes()
+        return BatchQuoteResult(result.df, result.source, result.updated_at, result.status)
 
     def _load_us_core_pool_entries(self) -> tuple[StockIndexEntry, ...]:
         pool_path = self._repo_root() / "data" / "us_ranking_core_pool.csv"
@@ -470,29 +388,10 @@ class StockDiscoveryService:
 
     @staticmethod
     def _call_with_timeout(func: Any, timeout_seconds: float, task_name: str) -> Any:
-        executor = ThreadPoolExecutor(max_workers=1)
-        try:
-            future = executor.submit(func)
-            return future.result(timeout=timeout_seconds)
-        except FuturesTimeout as exc:
-            raise TimeoutError(f"{task_name} timeout after {timeout_seconds}s") from exc
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+        return market_metrics.call_with_timeout(func, timeout_seconds, task_name)
 
     def _build_quote_lookup(self, df: pd.DataFrame, market: str) -> dict[str, pd.Series]:
-        lookup: dict[str, pd.Series] = {}
-        for _, row in df.iterrows():
-            raw_code = self._first_value(row, ("代码", "股票代码", "code", "symbol", "ts_code"))
-            if raw_code is None:
-                continue
-            keys = set(build_stock_index_lookup_keys(str(raw_code), str(raw_code)))
-            if market == "HK":
-                digits = str(raw_code).strip().upper().removeprefix("HK")
-                if digits.isdigit() and 1 <= len(digits) <= 5:
-                    keys.update(build_stock_index_lookup_keys(digits.zfill(5), digits.zfill(5)))
-            for key in keys:
-                lookup[key.upper()] = row
-        return lookup
+        return market_metrics.build_quote_lookup(df, market)
 
     def _find_quote_row(
         self,
@@ -528,10 +427,7 @@ class StockDiscoveryService:
 
     @staticmethod
     def _first_value(row: pd.Series, columns: Iterable[str]) -> Any:
-        for column in columns:
-            if column in row and pd.notna(row[column]):
-                return row[column]
-        return None
+        return market_metrics.first_value(row, columns)
 
     @staticmethod
     def _format_dt(value: datetime | str | None) -> str | None:
