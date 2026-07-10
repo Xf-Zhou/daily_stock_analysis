@@ -86,7 +86,7 @@ export function SuggestionsList({
 const MARKET_BADGE_CONFIG = {
   CN: { label: 'A股', className: 'border-danger/25 bg-danger/10 text-danger' },
   HK: { label: '港股', className: 'border-success/25 bg-success/10 text-success' },
-  US: { label: '美股', className: 'border-cyan/25 bg-cyan/10 text-cyan' },
+  US: { label: '美股', className: 'border-border bg-muted text-foreground' },
   INDEX: { label: '指数', className: 'border-purple/25 bg-purple/10 text-purple' },
   ETF: { label: 'ETF', className: 'border-warning/25 bg-warning/10 text-warning' },
   BSE: { label: '北交所', className: 'border-orange-500/25 bg-orange-500/10 text-orange-500' },
@@ -109,7 +109,7 @@ function MarketBadge({ market }: { market: string }) {
 // Helper component: Match type badge
 function MatchTypeBadge({ matchType }: { matchType: string }) {
   const configMap = {
-    exact: { label: '精确', className: 'border-cyan/25 bg-cyan/10 text-cyan' },
+    exact: { label: '精确', className: 'border-border bg-muted text-foreground' },
     prefix: { label: '前缀', className: 'border-purple/25 bg-purple/10 text-purple' },
     contains: { label: '包含', className: 'border-warning/25 bg-warning/10 text-warning' },
     fuzzy: { label: '模糊', className: 'border-border/55 bg-elevated/75 text-muted-text' },

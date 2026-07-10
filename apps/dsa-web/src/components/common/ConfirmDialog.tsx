@@ -30,32 +30,35 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
   const dialog = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm transition-all"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 transition-opacity"
       onClick={onCancel}
     >
       <div
-        className="mx-4 w-full max-w-sm rounded-xl border border-border/70 bg-elevated p-6 shadow-2xl animate-in fade-in zoom-in duration-200"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-dialog-title"
+        className="mx-4 w-full max-w-sm animate-in rounded-lg border border-border bg-card p-6 shadow-xl fade-in zoom-in duration-200"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-2 text-lg font-medium text-foreground">{title}</h3>
-        <p className="text-sm text-secondary-text mb-6 leading-relaxed">
+        <h3 id="confirm-dialog-title" className="mb-2 text-lg font-semibold text-foreground">{title}</h3>
+        <p className="mb-6 text-sm leading-relaxed text-muted-foreground">
           {message}
         </p>
         <div className="flex justify-end gap-3">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg border border-border/70 px-4 py-2 text-sm font-medium text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
+            className="rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
           >
             {cancelText}
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className={`rounded-lg px-4 py-2 text-sm font-medium text-foreground transition-colors ${
+            className={`rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
               isDanger
-                ? 'bg-red-500/80 hover:bg-red-500 shadow-lg shadow-red-500/20'
-                : 'bg-cyan/80 hover:bg-cyan shadow-lg shadow-cyan/20'
+                ? 'border-danger bg-danger text-destructive-foreground hover:bg-danger/90'
+                : 'border-primary bg-primary text-primary-foreground hover:bg-primary/90'
             }`}
           >
             {confirmText}

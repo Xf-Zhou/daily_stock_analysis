@@ -9,6 +9,15 @@ describe('Button', () => {
     expect(screen.getByRole('button', { name: 'Click me' })).toBeInTheDocument();
   });
 
+  it('uses the neutral primary treatment without gradient or glow classes', () => {
+    render(<Button>Analyze</Button>);
+
+    const button = screen.getByRole('button', { name: 'Analyze' });
+    expect(button).toHaveAttribute('data-slot', 'button');
+    expect(button).toHaveClass('bg-primary', 'text-primary-foreground', 'rounded-md');
+    expect(button.className).not.toMatch(/gradient|glow|cyan/);
+  });
+
   it('uses button type by default and exposes the selected variant', () => {
     render(<Button variant="danger">Delete</Button>);
 
@@ -37,15 +46,13 @@ describe('Button', () => {
   });
 
   it.each([
-    ['action-primary', '--home-action-ai-bg', '--home-action-ai-border', '--home-action-ai-text'],
-    ['action-secondary', '--home-action-report-bg', '--home-action-report-border', '--home-action-report-text'],
-  ] as const)('supports the %s variant', (variant, bgToken, borderToken, textToken) => {
+    ['action-primary', 'bg-primary', 'text-primary-foreground'],
+    ['action-secondary', 'border-input', 'bg-background'],
+  ] as const)('maps the %s alias to shared button styles', (variant, firstClass, secondClass) => {
     render(<Button variant={variant}>Quick Action</Button>);
 
     const button = screen.getByRole('button', { name: 'Quick Action' });
     expect(button).toHaveAttribute('data-variant', variant);
-    expect(button.className).toContain(bgToken);
-    expect(button.className).toContain(borderToken);
-    expect(button.className).toContain(textToken);
+    expect(button).toHaveClass(firstClass, secondClass);
   });
 });

@@ -177,6 +177,13 @@ describe('CandidatePoolPage', () => {
     );
 
     expect(screen.getByRole('heading', { name: '推荐关注' })).toBeInTheDocument();
+    expect(screen.getByTestId('candidate-page')).toHaveClass('max-w-[2160px]');
+    expect(screen.getByTestId('candidate-search-field')).toHaveClass('2xl:max-w-[720px]');
+    expect(screen.getByTestId('candidate-filter-grid')).toHaveClass(
+      '2xl:grid-cols-[160px_minmax(260px,720px)_220px_180px_auto]',
+    );
+    expect(screen.getByTestId('candidate-toolbar')).toHaveAttribute('data-slot', 'toolbar');
+    expect(screen.getByTestId('candidate-table-scroll')).toHaveAttribute('data-slot', 'data-table');
     expect(screen.getByText('规则评分')).toBeInTheDocument();
     expect(screen.getByText('贵州茅台')).toBeInTheDocument();
     expect(screen.getByText('平安银行')).toBeInTheDocument();

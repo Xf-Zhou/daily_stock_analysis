@@ -242,9 +242,16 @@ describe('DiscoverPage', () => {
     );
 
     expect(screen.getByTestId('discover-compact-toolbar')).toBeInTheDocument();
+    expect(screen.getByTestId('discover-page')).toHaveClass('max-w-[2160px]');
+    expect(screen.getByTestId('discover-search-field')).toHaveClass('2xl:max-w-[720px]');
+    expect(screen.getByTestId('discover-filter-grid')).toHaveClass(
+      '2xl:grid-cols-[160px_minmax(260px,720px)_220px_minmax(360px,1fr)]',
+    );
+    expect(screen.getByTestId('discover-compact-toolbar')).toHaveAttribute('data-slot', 'toolbar');
     expect(screen.getByTestId('discover-compact-metrics')).toHaveTextContent('当前市场');
     expect(screen.getByTestId('discover-compact-metrics')).toHaveTextContent('当前结果');
     expect(screen.getByTestId('discover-compact-metrics')).toHaveTextContent('行业覆盖率');
+    expect(screen.getByTestId('discover-stock-table-scroll')).toHaveAttribute('data-slot', 'data-table');
   });
 
   it('distinguishes unavailable rankings from empty ranking results', async () => {

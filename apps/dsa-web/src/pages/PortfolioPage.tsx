@@ -58,10 +58,10 @@ type FxRefreshContext = {
 type PortfolioAlertVariant = 'info' | 'success' | 'warning' | 'danger';
 
 const PORTFOLIO_INPUT_CLASS =
-  'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  'h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm transition-colors placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60';
 const PORTFOLIO_SELECT_CLASS = `${PORTFOLIO_INPUT_CLASS} appearance-none pr-10`;
 const PORTFOLIO_FILE_PICKER_CLASS =
-  'input-surface input-focus-glow flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  'flex h-10 w-full cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60';
 
 function getTodayIso(): string {
   return toDateInputValue(new Date());
@@ -784,19 +784,19 @@ const PortfolioPage: React.FC = () => {
   };
 
   return (
-    <div className="portfolio-page min-h-screen space-y-4 p-4 md:p-6">
+    <div data-testid="portfolio-workspace" data-layout="financial-workspace" className="portfolio-page min-h-screen space-y-4 bg-background p-4 md:p-6">
       <section className="space-y-3">
         <div className="space-y-2">
           <h1 className="text-xl md:text-2xl font-semibold text-foreground">持仓管理</h1>
-          <p className="text-xs md:text-sm text-secondary">
+          <p className="text-xs text-muted-foreground md:text-sm">
             组合快照、手工录入、CSV 导入与风险分析（支持全组合 / 单账户切换）
           </p>
         </div>
         {hasAccounts ? (
-          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+          <div data-testid="portfolio-toolbar" data-slot="toolbar" className="rounded-lg border border-border bg-card p-4 shadow-sm">
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_220px_280px] gap-2 items-end">
               <div>
-                <p className="text-xs text-secondary mb-1">账户视图</p>
+                <p className="mb-1 text-xs text-muted-foreground">账户视图</p>
                 <select
                   value={String(selectedAccount)}
                   onChange={(e) => setSelectedAccount(e.target.value === 'all' ? 'all' : Number(e.target.value))}
@@ -811,7 +811,7 @@ const PortfolioPage: React.FC = () => {
                 </select>
               </div>
               <div>
-                <p className="text-xs text-secondary mb-1">成本口径</p>
+                <p className="mb-1 text-xs text-muted-foreground">成本口径</p>
                 <select
                   value={costMethod}
                   onChange={(e) => setCostMethod(e.target.value as PortfolioCostMethod)}
@@ -941,21 +941,21 @@ const PortfolioPage: React.FC = () => {
       ) : null}
 
       <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-        <Card variant="gradient" padding="md">
-          <p className="text-xs text-secondary">总权益</p>
+        <Card variant="bordered" padding="md" className="shadow-sm">
+          <p className="text-xs text-muted-foreground">总权益</p>
           <p className="mt-1 text-xl font-semibold text-foreground">{formatMoney(snapshot?.totalEquity, snapshot?.currency || 'CNY')}</p>
         </Card>
-        <Card variant="gradient" padding="md">
-          <p className="text-xs text-secondary">总市值</p>
+        <Card variant="bordered" padding="md" className="shadow-sm">
+          <p className="text-xs text-muted-foreground">总市值</p>
           <p className="mt-1 text-xl font-semibold text-foreground">{formatMoney(snapshot?.totalMarketValue, snapshot?.currency || 'CNY')}</p>
         </Card>
-        <Card variant="gradient" padding="md">
-          <p className="text-xs text-secondary">总现金</p>
+        <Card variant="bordered" padding="md" className="shadow-sm">
+          <p className="text-xs text-muted-foreground">总现金</p>
           <p className="mt-1 text-xl font-semibold text-foreground">{formatMoney(snapshot?.totalCash, snapshot?.currency || 'CNY')}</p>
         </Card>
-        <Card variant="gradient" padding="md">
+        <Card variant="bordered" padding="md" className="shadow-sm">
           <div className="flex items-start justify-between gap-3">
-            <p className="text-xs text-secondary">汇率状态</p>
+            <p className="text-xs text-muted-foreground">汇率状态</p>
             <button
               type="button"
               className="btn-secondary !px-3 !py-1 !text-xs shrink-0"
@@ -990,9 +990,9 @@ const PortfolioPage: React.FC = () => {
               className="border-none bg-transparent px-4 py-8 shadow-none"
             />
           ) : (
-            <div className="overflow-x-auto">
+            <div data-slot="data-table" role="region" aria-label="持仓明细" className="overflow-x-auto rounded-md border border-border">
               <table className="w-full text-sm">
-                <thead className="text-xs text-secondary border-b border-white/10">
+                <thead className="border-b border-border bg-muted/70 text-xs text-muted-foreground">
                   <tr>
                     <th className="text-left py-2 pr-2">账户</th>
                     <th className="text-left py-2 pr-2">代码</th>
@@ -1006,7 +1006,7 @@ const PortfolioPage: React.FC = () => {
                 </thead>
                 <tbody>
                   {positionRows.map((row) => (
-                    <tr key={`${row.accountId}-${row.symbol}-${row.market}`} className="border-b border-white/5">
+                    <tr key={`${row.accountId}-${row.symbol}-${row.market}`} className="border-b border-border last:border-0 hover:bg-muted/40">
                       <td className="py-2 pr-2 text-secondary">{row.accountName}</td>
                       <td className="py-2 pr-2 font-mono text-foreground">{row.symbol}</td>
                       <td className="py-2 pr-2 text-right">{row.quantity.toFixed(2)}</td>
@@ -1298,9 +1298,9 @@ const PortfolioPage: React.FC = () => {
             <div className="text-[11px] text-secondary">
               {writeBlocked ? '删除修正仅在单账户视图可用。请先选择具体账户后再删除错误流水。' : '如有错误流水，可直接删除后重新录入。'}
             </div>
-            <div className="max-h-64 overflow-auto rounded-lg border border-white/10 p-2">
+            <div className="max-h-64 overflow-auto rounded-md border border-border p-2">
               {eventType === 'trade' && tradeEvents.map((item) => (
-                <div key={`t-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
+                <div key={`t-${item.id}`} className="flex items-start justify-between gap-3 border-b border-border py-2 text-xs text-muted-foreground">
                   <div className="min-w-0">
                     {item.tradeDate} {formatSideLabel(item.side)} {item.symbol} 数量={item.quantity} 价格={item.price}
                   </div>
@@ -1320,7 +1320,7 @@ const PortfolioPage: React.FC = () => {
                 </div>
               ))}
               {eventType === 'cash' && cashEvents.map((item) => (
-                <div key={`c-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
+                <div key={`c-${item.id}`} className="flex items-start justify-between gap-3 border-b border-border py-2 text-xs text-muted-foreground">
                   <div className="min-w-0">
                     {item.eventDate} {formatCashDirectionLabel(item.direction)} {item.amount} {item.currency}
                   </div>
@@ -1340,7 +1340,7 @@ const PortfolioPage: React.FC = () => {
                 </div>
               ))}
               {eventType === 'corporate' && corporateEvents.map((item) => (
-                <div key={`ca-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
+                <div key={`ca-${item.id}`} className="flex items-start justify-between gap-3 border-b border-border py-2 text-xs text-muted-foreground">
                   <div className="min-w-0">
                     {item.effectiveDate} {formatCorporateActionLabel(item.actionType)} {item.symbol}
                   </div>

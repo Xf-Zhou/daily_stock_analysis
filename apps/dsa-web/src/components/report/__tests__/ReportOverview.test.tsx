@@ -19,6 +19,15 @@ const baseSummary = {
 };
 
 describe('ReportOverview', () => {
+  it('keeps the sentiment panel compact on ultrawide report layouts', () => {
+    const { container } = render(<ReportOverview meta={baseMeta} summary={baseSummary} />);
+
+    expect(container.querySelector('[data-slot="report-overview-grid"]')).toHaveClass(
+      'lg:grid-cols-[minmax(0,1fr)_20rem]',
+    );
+    expect(container.querySelector('[data-slot="sentiment-panel"]')).not.toBeNull();
+  });
+
   it('renders related boards with leading and lagging markers', () => {
     render(
       <ReportOverview

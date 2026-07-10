@@ -13,21 +13,21 @@ interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
 }
 
 const variantStyles: Record<BadgeVariant, string> = {
-  default: 'border-border/55 bg-elevated/75 text-secondary-text',
+  default: 'border-border bg-muted text-muted-foreground',
   success: 'border-success/20 bg-success/10 text-success',
   warning: 'border-warning/20 bg-warning/10 text-warning',
   danger: 'border-danger/20 bg-danger/10 text-danger',
-  info: 'border-cyan/30 bg-cyan/12 text-cyan',
-  history: 'border-purple/20 bg-purple/10 text-purple',
+  info: 'border-border bg-muted text-foreground',
+  history: 'border-border bg-muted text-foreground',
 };
 
 const glowStyles: Record<BadgeVariant, string> = {
-  default: '',
-  success: 'shadow-success/20',
-  warning: 'shadow-warning/20',
-  danger: 'shadow-danger/20',
-  info: 'shadow-cyan/20',
-  history: 'shadow-purple/20',
+  default: 'ring-border/40',
+  success: 'ring-success/30',
+  warning: 'ring-warning/30',
+  danger: 'ring-danger/30',
+  info: 'ring-border/40',
+  history: 'ring-border/40',
 };
 
 /**
@@ -47,12 +47,13 @@ export const Badge: React.FC<BadgeProps> = ({
   return (
     <span
       {...rest}
+      data-slot="badge"
       style={style}
       className={cn(
-        'inline-flex items-center gap-1 rounded-full border font-medium backdrop-blur-sm',
+        'inline-flex items-center gap-1 rounded-md border font-medium',
         sizeStyles,
         variantStyles[variant],
-        glow && `shadow-lg ${glowStyles[variant]}`,
+        glow && `ring-1 ${glowStyles[variant]}`,
         className,
       )}
     >

@@ -53,7 +53,7 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
 
       {/* 分析模型标记（Issue #528）— 报告末尾 */}
       {shouldShowModel && (
-        <p className="px-1 text-xs text-muted-text">
+        <p className="px-1 text-xs text-muted-foreground">
           {text.analysisModel}: {modelUsed}
         </p>
       )}

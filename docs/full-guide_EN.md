@@ -1008,6 +1008,7 @@ FastAPI provides RESTful API service for configuration management and triggering
 
 ### Features
 
+- **Light-first workspace** - The Web UI uses a neutral, compact shadcn/ui-inspired visual system, defaults to light while retaining dark and system themes, and provides a grouped collapsible desktop sidebar whose route, theme, logout, and expand icons show visible help on mouse hover and keyboard focus
 - **Configuration Management** - View/modify watchlist
 - **Login Protection** - Enable admin password login with `ADMIN_AUTH_ENABLED=true` and optionally bind TOTP MFA in Settings; disabling admin auth keeps MFA configuration but pauses enforcement, and re-enabling auth still requires MFA
 - **Quick Analysis** - Trigger stock analysis via API; the Home page also provides a Market Review button that starts a background market recap in Docker/server mode

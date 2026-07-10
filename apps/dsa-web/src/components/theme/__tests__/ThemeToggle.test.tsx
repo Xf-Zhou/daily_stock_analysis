@@ -34,4 +34,26 @@ describe('ThemeToggle', () => {
     expect(screen.getByRole('menuitemradio', { name: '深色' })).toBeInTheDocument();
     expect(screen.getByRole('menuitemradio', { name: '跟随系统' })).toBeInTheDocument();
   });
+
+  it('shows visible help for the collapsed navigation trigger', () => {
+    render(
+      <ThemeProvider>
+        <ThemeToggle variant="nav" collapsed />
+      </ThemeProvider>
+    );
+
+    const trigger = screen.getByRole('button', { name: '切换主题' });
+    fireEvent.mouseEnter(trigger);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('主题');
+
+    fireEvent.mouseLeave(trigger);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+
+    fireEvent.focus(trigger);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('主题');
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole('menu', { name: '主题模式' })).toBeInTheDocument();
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
 });

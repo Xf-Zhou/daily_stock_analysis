@@ -222,7 +222,7 @@ export const StockKLineChart: React.FC<StockKLineChartProps> = ({ data, classNam
   }
 
   return (
-    <div className={cn('rounded-xl border border-border/50 bg-card/55 p-3', className)}>
+    <div className={cn('rounded-lg border border-border bg-card p-3', className)}>
       <div className="mb-3 flex flex-col gap-2">
         <div className="flex flex-wrap gap-2">
           {(['ma5', 'ma10', 'ma20'] as const).map((key) => (
@@ -234,8 +234,8 @@ export const StockKLineChart: React.FC<StockKLineChartProps> = ({ data, classNam
               className={cn(
                 'inline-flex h-7 items-center rounded-md border px-2 text-xs font-medium transition-colors',
                 visibleMa[key]
-                  ? 'border-cyan/30 bg-cyan/10 text-cyan'
-                  : 'border-border/60 bg-base/40 text-secondary-text hover:text-foreground',
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
             >
               {key.toUpperCase()}
@@ -248,8 +248,8 @@ export const StockKLineChart: React.FC<StockKLineChartProps> = ({ data, classNam
             className={cn(
               'inline-flex h-7 items-center rounded-md border px-2 text-xs font-medium transition-colors',
               showVolume
-                ? 'border-cyan/30 bg-cyan/10 text-cyan'
-                : 'border-border/60 bg-base/40 text-secondary-text hover:text-foreground',
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground',
             )}
           >
             成交量
@@ -257,7 +257,7 @@ export const StockKLineChart: React.FC<StockKLineChartProps> = ({ data, classNam
         </div>
         <div
           data-testid="stock-kline-hover-info"
-          className="flex h-8 min-h-8 w-full min-w-0 items-center gap-3 overflow-x-auto overflow-y-hidden whitespace-nowrap rounded-lg border border-border/40 bg-base/25 px-2 text-xs text-secondary-text"
+          className="flex h-8 min-h-8 w-full min-w-0 items-center gap-3 overflow-x-auto overflow-y-hidden whitespace-nowrap rounded-md border border-border bg-muted/30 px-2 text-xs text-muted-foreground"
         >
           {visibleHoverPoint ? (
             <>

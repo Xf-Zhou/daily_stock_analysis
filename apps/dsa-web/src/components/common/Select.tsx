@@ -43,12 +43,13 @@ export const Select: React.FC<SelectProps> = ({
       <div className="relative">
         <select
           id={resolvedId}
+          data-slot="select"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           className={cn(
-            'input-surface input-focus-glow h-11 w-full appearance-none rounded-xl border bg-transparent px-4 py-2.5 pr-10 text-sm text-foreground',
-            'transition-all duration-200 focus:outline-none',
+            'h-10 w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-10 text-sm text-foreground shadow-sm',
+            'transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
             disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
           )}
         >
@@ -58,7 +59,7 @@ export const Select: React.FC<SelectProps> = ({
             </option>
           )}
           {options.map((option) => (
-            <option key={option.value} value={option.value} className="bg-elevated text-foreground">
+            <option key={option.value} value={option.value} className="bg-background text-foreground">
               {option.label}
             </option>
           ))}

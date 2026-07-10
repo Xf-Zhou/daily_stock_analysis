@@ -22,7 +22,8 @@ export const ApiErrorAlert: React.FC<ApiErrorAlertProps> = ({
 
   return (
     <div
-      className={`rounded-xl border border-[hsl(var(--color-danger-alert-border)/0.3)] bg-[hsl(var(--color-danger-alert-bg)/0.1)] px-4 py-3 text-[hsl(var(--color-danger-alert-text))] ${className}`}
+      data-slot="api-error-alert"
+      className={`rounded-lg border border-destructive/25 bg-destructive/10 px-4 py-3 text-destructive ${className}`}
       role="alert"
     >
       <div className="flex items-start justify-between gap-3">
@@ -33,7 +34,7 @@ export const ApiErrorAlert: React.FC<ApiErrorAlertProps> = ({
         {onDismiss ? (
           <button
             type="button"
-            className="shrink-0 rounded-md border border-[hsl(var(--color-danger-alert-border)/0.3)] bg-[hsl(var(--color-danger-alert-bg)/0.1)] px-2 py-1 text-[11px] text-[hsl(var(--color-danger-alert-text))] transition hover:bg-[hsl(var(--color-danger-alert-bg)/0.15)]"
+            className="shrink-0 rounded-md border border-destructive/25 bg-background/50 px-2 py-1 text-[11px] transition-colors hover:bg-destructive/10"
             onClick={onDismiss}
           >
             {dismissLabel}
@@ -41,9 +42,9 @@ export const ApiErrorAlert: React.FC<ApiErrorAlertProps> = ({
         ) : null}
       </div>
       {showDetails ? (
-        <details className="mt-3 rounded-lg border border-subtle bg-surface-2 px-3 py-2">
-          <summary className="cursor-pointer text-xs text-[hsl(var(--color-danger-alert-text))] opacity-90">查看详情</summary>
-          <pre className="mt-2 whitespace-pre-wrap break-words text-[11px] leading-5 text-[hsl(var(--color-danger-alert-text))] opacity-85">
+        <details className="mt-3 rounded-md border border-destructive/20 bg-background/50 px-3 py-2">
+          <summary className="cursor-pointer text-xs opacity-90">查看详情</summary>
+          <pre className="mt-2 whitespace-pre-wrap break-words text-[11px] leading-5 opacity-85">
             {error.rawMessage}
           </pre>
         </details>
@@ -51,7 +52,7 @@ export const ApiErrorAlert: React.FC<ApiErrorAlertProps> = ({
       {actionLabel && onAction ? (
         <button
           type="button"
-          className="mt-3 inline-flex items-center justify-center rounded-md border border-[hsl(var(--color-danger-alert-border)/0.3)] bg-[hsl(var(--color-danger-alert-bg)/0.1)] px-3 py-1.5 text-xs font-medium text-[hsl(var(--color-danger-alert-text))] transition hover:bg-[hsl(var(--color-danger-alert-bg)/0.15)]"
+          className="mt-3 inline-flex items-center justify-center rounded-md border border-destructive/25 bg-background/50 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-destructive/10"
           onClick={onAction}
         >
           {actionLabel}

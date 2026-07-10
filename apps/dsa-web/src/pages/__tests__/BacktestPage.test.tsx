@@ -92,10 +92,12 @@ describe('BacktestPage', () => {
     const filterInput = await screen.findByPlaceholderText('Filter by stock code (leave empty for all)');
     const windowInput = screen.getByPlaceholderText('10');
 
-    expect(filterInput).toHaveClass('input-surface');
-    expect(filterInput).toHaveClass('input-focus-glow');
-    expect(windowInput).toHaveClass('input-surface');
-    expect(windowInput).toHaveClass('input-focus-glow');
+    expect(filterInput).toHaveAttribute('data-slot', 'input');
+    expect(filterInput).toHaveClass('border-input');
+    expect(filterInput).not.toHaveClass('input-focus-glow');
+    expect(windowInput).toHaveAttribute('data-slot', 'input');
+    expect(screen.getByTestId('backtest-toolbar')).toHaveAttribute('data-slot', 'toolbar');
+    expect(await screen.findByTestId('backtest-results-table')).toHaveAttribute('data-slot', 'data-table');
 
     expect(await screen.findByText('WIN')).toBeInTheDocument();
     expect(screen.getByText('completed')).toBeInTheDocument();

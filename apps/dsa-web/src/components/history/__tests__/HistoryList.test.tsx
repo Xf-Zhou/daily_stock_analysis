@@ -44,7 +44,7 @@ describe('HistoryList', () => {
     expect(screen.getByText('暂无历史分析记录')).toBeInTheDocument();
     expect(screen.getByText('完成首次分析后，这里会保留最近结果。')).toBeInTheDocument();
     expect(screen.getByText('历史分析')).toBeInTheDocument();
-    expect(container.querySelector('.glass-card')).toBeTruthy();
+    expect(container.querySelector('[data-slot="history-list"]')).toBeTruthy();
   });
 
   it('renders selected count and forwards item interactions', () => {
@@ -65,7 +65,9 @@ describe('HistoryList', () => {
     expect(screen.getByText('已选 1')).toBeInTheDocument();
     expect(screen.getByText('买入 82')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /贵州茅台/i }));
+    const historyButton = screen.getByRole('button', { name: /贵州茅台/i });
+    expect(historyButton).toHaveAttribute('data-slot', 'history-item');
+    fireEvent.click(historyButton);
     expect(onItemClick).toHaveBeenCalledWith(1);
 
     fireEvent.click(screen.getAllByRole('checkbox')[1]);

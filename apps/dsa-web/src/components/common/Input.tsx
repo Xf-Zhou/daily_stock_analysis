@@ -9,8 +9,6 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   hint?: string;
   error?: string;
   trailingAction?: React.ReactNode;
-  /** Selects a scoped visual appearance for the input. */
-  appearance?: 'default' | 'login';
   /** Enables the built-in password visibility toggle. */
   allowTogglePassword?: boolean;
   /** Controls the leading icon style. */
@@ -28,7 +26,6 @@ export const Input = ({
   className = '', 
   id, 
   trailingAction, 
-  appearance = 'default',
   allowTogglePassword,
   iconType = 'none',
   passwordVisible,
@@ -45,7 +42,6 @@ export const Input = ({
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const isPasswordInput = props.type === 'password';
   const isVisibilityControlled = typeof passwordVisible === 'boolean';
-  const isLoginAppearance = appearance === 'login';
   const visible = isVisibilityControlled ? passwordVisible : isPasswordVisible;
   const effectiveType = isPasswordInput && allowTogglePassword && visible ? 'text' : props.type;
 
@@ -53,20 +49,14 @@ export const Input = ({
     if (iconType === 'password') {
       return (
         <Lock
-          className={cn(
-            'h-4 w-4',
-            isLoginAppearance ? 'text-[var(--login-input-icon)]' : 'text-muted-text/55'
-          )}
+          className="h-4 w-4 text-muted-foreground"
         />
       );
     }
     if (iconType === 'key') {
       return (
         <Key
-          className={cn(
-            'h-4 w-4',
-            isLoginAppearance ? 'text-[var(--login-input-icon)]' : 'text-muted-text/55'
-          )}
+          className="h-4 w-4 text-muted-foreground"
         />
       );
     }
@@ -74,26 +64,13 @@ export const Input = ({
   };
 
   const leadingIcon = renderLeadingIcon();
-  const inputStyle = error
-    ? {
-      ...props.style,
-      ['--input-surface-border-focus' as string]: 'hsla(var(--destructive), 0.4)',
-      ['--input-surface-focus-ring' as string]: '0 0 0 4px hsla(var(--destructive), 0.1)',
-    }
-    : props.style;
-
   const defaultTrailingAction = isPasswordInput && allowTogglePassword ? (
     <button
       type="button"
       className={cn(
-        'inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200 focus:outline-none focus:ring-2',
-        isLoginAppearance
-          ? visible
-            ? 'border-[var(--login-input-toggle-active-border)] bg-[var(--login-input-toggle-active-bg)] text-[var(--login-input-toggle-active-text)] shadow-[0_0_14px_var(--login-accent-glow)] focus:ring-[var(--login-input-toggle-ring)]'
-            : 'border-[var(--login-input-toggle-border)] bg-[var(--login-input-toggle-bg)] text-[var(--login-input-toggle-text)] hover:border-[var(--login-input-toggle-border-hover)] hover:bg-[var(--login-input-toggle-bg-hover)] hover:text-[var(--login-input-toggle-text-hover)] focus:ring-[var(--login-input-toggle-ring)]'
-          : visible
-            ? 'border-warning/40 bg-warning/15 text-warning shadow-[0_0_10px_hsla(var(--warning),0.15)]'
-            : 'border-border/40 bg-muted/20 text-muted-text hover:border-warning/40 hover:text-warning hover:shadow-[0_0_10px_hsla(var(--warning),0.15)] focus:ring-primary/30'
+        'inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors duration-200',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        visible ? 'bg-accent text-foreground' : 'hover:bg-accent hover:text-foreground',
       )}
       onClick={() => {
         const nextVisible = !visible;
@@ -118,7 +95,7 @@ export const Input = ({
           htmlFor={inputId}
           className={cn(
             'mb-2 text-sm font-medium',
-            isLoginAppearance ? 'text-[var(--login-label-text)]' : 'text-foreground'
+            'text-foreground'
           )}
         >
           {label}
@@ -132,14 +109,13 @@ export const Input = ({
         )}
         <input
           id={inputId}
+          data-slot="input"
           aria-describedby={describedBy}
           aria-invalid={ariaInvalid}
-          style={inputStyle}
-          data-appearance={appearance}
+          style={props.style}
           className={cn(
-            'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-all',
-            'focus:outline-none',
-            isLoginAppearance ? 'input-appearance-login' : '',
+            'h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm transition-colors duration-200',
+            'placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
             error ? 'border-danger/30' : '',
             leadingIcon ? 'pl-10' : '',
             finalTrailingAction ? 'pr-12' : '',
@@ -161,7 +137,7 @@ export const Input = ({
           role="alert"
           className={cn(
             'mt-2 text-xs',
-            isLoginAppearance ? 'text-[var(--login-error-text)]' : 'text-danger'
+            'text-danger'
           )}
         >
           {error}
@@ -171,7 +147,7 @@ export const Input = ({
           id={hintId}
           className={cn(
             'mt-2 text-xs',
-            isLoginAppearance ? 'text-[var(--login-hint-text)]' : 'text-secondary-text'
+            'text-muted-foreground'
           )}
         >
           {hint}

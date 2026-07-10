@@ -37,7 +37,7 @@ export const JsonViewer: React.FC<JsonViewerProps> = ({
       // 高亮 key
       let highlighted = line.replace(
         /"([^"]+)":/g,
-        '<span class="text-cyan-400">"$1"</span>:'
+        '<span class="font-semibold text-foreground">"$1"</span>:'
       );
       // 高亮字符串值
       highlighted = highlighted.replace(
@@ -70,9 +70,7 @@ export const JsonViewer: React.FC<JsonViewerProps> = ({
       {/* 复制按钮 */}
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 px-2 py-1 text-xs rounded
-          bg-slate-700 hover:bg-slate-600 text-gray-300
-          transition-colors z-10"
+        className="absolute right-2 top-2 z-10 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent"
       >
         {copied ? '已复制!' : '复制'}
       </button>

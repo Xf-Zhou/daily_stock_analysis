@@ -17,8 +17,8 @@ interface StatCardProps {
 }
 
 const toneStyles = {
-  default: 'border-subtle',
-  primary: 'border-cyan/18',
+  default: 'border-border',
+  primary: 'border-border',
   success: 'border-success/18',
   warning: 'border-warning/18',
   danger: 'border-danger/18',
@@ -33,14 +33,14 @@ export const StatCard: React.FC<StatCardProps> = ({
   className = '',
 }) => {
   return (
-    <div className={cn('rounded-2xl border bg-card/75 p-4 shadow-soft-card', toneStyles[tone], className)}>
+    <div data-slot="stat-card" className={cn('rounded-lg border bg-card p-4 text-card-foreground shadow-sm', toneStyles[tone], className)}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.22em] text-secondary-text">{label}</p>
+          <p className="text-sm font-medium text-muted-foreground">{label}</p>
           <div className="mt-2 text-2xl font-semibold text-foreground">{value}</div>
-          {hint ? <div className="mt-2 text-sm text-secondary-text">{hint}</div> : null}
+          {hint ? <div className="mt-2 text-sm text-muted-foreground">{hint}</div> : null}
         </div>
-        {icon ? <div className="text-cyan">{icon}</div> : null}
+        {icon ? <div className="text-muted-foreground">{icon}</div> : null}
       </div>
     </div>
   );

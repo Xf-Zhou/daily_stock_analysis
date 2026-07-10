@@ -192,6 +192,9 @@ describe('ChatPage', () => {
     );
 
     expect(await screen.findByTestId('chat-workspace')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-workspace')).toHaveAttribute('data-layout', 'chat-workspace');
+    expect(screen.getByTestId('chat-desktop-sidebar')).toHaveAttribute('data-slot', 'conversation-sidebar');
+    expect(screen.getByTestId('chat-composer')).toHaveAttribute('data-slot', 'composer');
     expect(screen.getByTestId('chat-session-list-scroll')).toBeInTheDocument();
     expect(screen.getByTestId('chat-message-scroll')).toBeInTheDocument();
     expect(mockLoadInitialSession).toHaveBeenCalled();

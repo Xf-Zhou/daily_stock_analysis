@@ -12,9 +12,9 @@ import type {
 } from '../types/backtest';
 
 const BACKTEST_INPUT_CLASS =
-  'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  'h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm transition-colors placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60';
 const BACKTEST_COMPACT_INPUT_CLASS =
-  'input-surface input-focus-glow h-10 rounded-xl border bg-transparent px-3 py-2 text-xs transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  'h-10 rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60';
 
 // ============ Helpers ============
 
@@ -112,9 +112,9 @@ const MetricRow: React.FC<{ label: string; value: string; accent?: boolean }> = 
 // ============ Performance Card ============
 
 const PerformanceCard: React.FC<{ metrics: PerformanceMetrics; title: string }> = ({ metrics, title }) => (
-  <Card variant="gradient" padding="md" className="animate-fade-in">
+  <Card variant="bordered" padding="md" className="animate-fade-in">
     <div className="mb-3">
-      <span className="label-uppercase">{title}</span>
+      <span className="text-xs font-medium text-muted-foreground">{title}</span>
     </div>
     <MetricRow label="Direction Accuracy" value={pct(metrics.directionAccuracyPct)} accent />
     <MetricRow label="Win Rate" value={pct(metrics.winRatePct)} accent />
@@ -124,13 +124,13 @@ const PerformanceCard: React.FC<{ metrics: PerformanceMetrics; title: string }> 
     <MetricRow label="TP Trigger Rate" value={pct(metrics.takeProfitTriggerRate)} />
     <MetricRow label="Avg Days to Hit" value={metrics.avgDaysToFirstHit != null ? metrics.avgDaysToFirstHit.toFixed(1) : '--'} />
     <div className="backtest-metric-footer">
-      <span className="text-xs text-muted-text">Evaluations</span>
-      <span className="text-xs text-secondary-text font-mono">
+      <span className="text-xs text-muted-foreground">Evaluations</span>
+      <span className="font-mono text-xs text-muted-foreground">
         {Number(metrics.completedCount)} / {Number(metrics.totalEvaluations)}
       </span>
     </div>
     <div className="flex items-center justify-between">
-      <span className="text-xs text-muted-text">W / L / N</span>
+      <span className="text-xs text-muted-foreground">W / L / N</span>
       <span className="text-xs font-mono">
         <span className="text-success">{metrics.winCount}</span>
         {' / '}
@@ -327,12 +327,13 @@ const BacktestPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-full flex flex-col rounded-[1.5rem] bg-transparent">
+    <div data-layout="financial-workspace" className="flex min-h-full flex-col bg-background">
       {/* Header */}
-      <header className="flex-shrink-0 border-b border-white/5 px-3 py-3 sm:px-4">
+      <header data-testid="backtest-toolbar" data-slot="toolbar" className="flex-shrink-0 border-b border-border bg-card px-3 py-3 sm:px-4">
         <div className="flex max-w-5xl flex-wrap items-center gap-2">
           <div className="relative min-w-0 flex-[1_1_220px]">
             <input
+              data-slot="input"
               type="text"
               value={codeFilter}
               onChange={(e) => setCodeFilter(e.target.value.toUpperCase())}
@@ -346,13 +347,14 @@ const BacktestPage: React.FC = () => {
             type="button"
             onClick={handleFilter}
             disabled={isLoadingResults}
-            className="btn-secondary flex items-center gap-1.5 whitespace-nowrap"
+            className="inline-flex h-10 items-center gap-1.5 whitespace-nowrap rounded-md border border-input bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
           >
             Filter
           </button>
           <div className="flex items-center gap-2 whitespace-nowrap lg:w-40 lg:justify-between">
-            <span className="text-xs text-muted-text">Window</span>
+            <span className="text-xs text-muted-foreground">Window</span>
             <input
+              data-slot="input"
               type="number"
               min={1}
               max={120}
@@ -364,8 +366,9 @@ const BacktestPage: React.FC = () => {
             />
           </div>
           <div className="flex items-center gap-2 whitespace-nowrap">
-            <span className="text-xs text-muted-text">From</span>
+            <span className="text-xs text-muted-foreground">From</span>
             <input
+              data-slot="input"
               type="date"
               aria-label="Analysis date from"
               value={analysisDateFrom}
@@ -376,8 +379,9 @@ const BacktestPage: React.FC = () => {
             />
           </div>
           <div className="flex items-center gap-2 whitespace-nowrap">
-            <span className="text-xs text-muted-text">To</span>
+            <span className="text-xs text-muted-foreground">To</span>
             <input
+              data-slot="input"
               type="date"
               aria-label="Analysis date to"
               value={analysisDateTo}
@@ -391,7 +395,7 @@ const BacktestPage: React.FC = () => {
             type="button"
             onClick={handleShowNextDay}
             disabled={isLoadingResults || isLoadingPerf}
-            className={`backtest-force-btn ${isNextDayValidation ? 'active' : ''}`}
+            className={`inline-flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors ${isNextDayValidation ? 'border-primary bg-primary text-primary-foreground' : 'border-input bg-background text-foreground hover:bg-accent'}`}
           >
             <span className="dot" />
             1D Validation
@@ -400,7 +404,7 @@ const BacktestPage: React.FC = () => {
             type="button"
             onClick={() => setForceRerun(!forceRerun)}
             disabled={isRunning}
-            className={`backtest-force-btn ${forceRerun ? 'active' : ''}`}
+            className={`inline-flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors ${forceRerun ? 'border-primary bg-primary text-primary-foreground' : 'border-input bg-background text-foreground hover:bg-accent'}`}
           >
             <span className="dot" />
             Force
@@ -409,7 +413,7 @@ const BacktestPage: React.FC = () => {
             type="button"
             onClick={handleRun}
             disabled={isRunning}
-            className="btn-primary flex items-center gap-1.5 whitespace-nowrap"
+            className="inline-flex h-10 items-center gap-1.5 whitespace-nowrap rounded-md border border-primary bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {isRunning ? (
               <>
@@ -432,7 +436,7 @@ const BacktestPage: React.FC = () => {
         {runError && (
           <ApiErrorAlert error={runError} className="mt-2 max-w-4xl" />
         )}
-        <p className="mt-2 text-xs text-muted-text">
+        <p className="mt-2 text-xs text-muted-foreground">
           {isNextDayValidation
             ? 'Next-day validation mode compares AI predictions with the next trading day close.'
             : 'Use window = 1 to review AI predictions against the next trading day close.'}
@@ -470,7 +474,7 @@ const BacktestPage: React.FC = () => {
           {isLoadingResults ? (
             <div className="flex flex-col items-center justify-center h-64">
               <div className="backtest-spinner md" />
-              <p className="mt-3 text-secondary-text text-sm">Loading results...</p>
+              <p className="mt-3 text-sm text-muted-foreground">Loading results...</p>
             </div>
           ) : results.length === 0 ? (
             <EmptyState
@@ -487,8 +491,8 @@ const BacktestPage: React.FC = () => {
             <div className="animate-fade-in">
               <div className="backtest-table-toolbar">
                 <div className="backtest-table-toolbar-meta">
-                  <span className="label-uppercase">{isNextDayValidation ? 'Next-Day Validation' : 'Result Set'}</span>
-                  <span className="text-xs text-secondary-text">
+                  <span className="text-xs font-medium text-foreground">{isNextDayValidation ? 'Next-Day Validation' : 'Result Set'}</span>
+                  <span className="text-xs text-muted-foreground">
                     {codeFilter.trim() ? `Filtered by ${codeFilter.trim()}` : 'All stocks'}
                     {evalDays ? ` · ${evalDays} day window` : ''}
                     {analysisDateFrom ? ` · from ${analysisDateFrom}` : ''}
@@ -497,7 +501,7 @@ const BacktestPage: React.FC = () => {
                 </div>
                 <span className="backtest-table-scroll-hint">Scroll horizontally on small screens</span>
               </div>
-              <div className="backtest-table-wrapper">
+              <div data-testid="backtest-results-table" data-slot="data-table" role="region" aria-label="回测结果" className="overflow-x-auto rounded-lg border border-border bg-card">
                 <table className="backtest-table min-w-[840px] w-full text-sm">
                   <thead className="backtest-table-head">
                     <tr className="text-left">

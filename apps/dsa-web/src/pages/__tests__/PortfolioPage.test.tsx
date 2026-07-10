@@ -241,6 +241,8 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
+    expect(screen.getByTestId('portfolio-workspace')).toHaveAttribute('data-layout', 'financial-workspace');
+    expect(screen.getByTestId('portfolio-toolbar')).toHaveAttribute('data-slot', 'toolbar');
     expect(await screen.findByText('过期')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '刷新汇率' })).toBeInTheDocument();
   });

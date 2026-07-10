@@ -44,7 +44,7 @@ function HelpSection({
 
   return (
     <section className="space-y-2">
-      <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-text">{title}</h3>
+      <h3 className="text-xs font-semibold text-muted-foreground">{title}</h3>
       {children}
     </section>
   );
@@ -59,7 +59,7 @@ function HelpList({ items }: { items?: string[] }) {
     <ul className="space-y-1.5 text-sm leading-6 text-secondary-text">
       {items.map((item) => (
         <li className="flex gap-2" key={item}>
-          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan/70" />
+          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-foreground/60" />
           <span>{item}</span>
         </li>
       ))}
@@ -174,7 +174,7 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
           <button
             ref={buttonRef}
             type="button"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-transparent text-muted-text transition-colors hover:border-[var(--settings-border)] hover:bg-[var(--settings-surface-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan/15"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={`查看 ${title} 配置说明`}
             aria-expanded={open}
             aria-controls={open ? titleId : undefined}
@@ -202,11 +202,11 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
                 aria-labelledby={titleId}
                 tabIndex={-1}
                 className={cn(
-                  'relative flex max-h-[88vh] w-full flex-col overflow-hidden rounded-t-2xl border border-border/80 bg-card shadow-soft-card-strong',
-                  'sm:max-w-2xl sm:rounded-2xl',
+                  'relative flex max-h-[88vh] w-full flex-col overflow-hidden rounded-t-lg border border-border bg-card shadow-xl',
+                  'sm:max-w-2xl sm:rounded-lg',
                 )}
               >
-                <div className="h-1 w-full bg-gradient-to-r from-cyan/80 via-primary/70 to-purple/70" />
+                <div className="h-1 w-full bg-primary" />
                 <div className="flex items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
                   <div className="min-w-0">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-text">

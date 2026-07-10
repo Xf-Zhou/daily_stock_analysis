@@ -3,6 +3,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { Input } from '../Input';
 
 describe('Input', () => {
+  it('uses the shared compact input surface and focus ring', () => {
+    render(<Input label="股票代码" />);
+
+    const input = screen.getByLabelText('股票代码');
+    expect(input).toHaveAttribute('data-slot', 'input');
+    expect(input).toHaveClass('h-10', 'rounded-md', 'border-input');
+    expect(input.className).toContain('focus-visible:ring-2');
+  });
+
   it('wires label and hint text to the input', () => {
     render(<Input label="API Key" hint="Stored locally" name="api_key" />);
 
@@ -69,15 +78,4 @@ describe('Input', () => {
     expect(onPasswordVisibleChange).toHaveBeenCalledWith(false);
   });
 
-  it('supports the login appearance without affecting password toggle behavior', () => {
-    render(<Input label="登录密码" type="password" allowTogglePassword appearance="login" />);
-
-    const input = screen.getByLabelText('登录密码');
-    expect(input).toHaveAttribute('data-appearance', 'login');
-    expect(input).toHaveClass('input-appearance-login');
-    expect(input).toHaveAttribute('type', 'password');
-
-    fireEvent.click(screen.getByRole('button', { name: '显示内容' }));
-    expect(input).toHaveAttribute('type', 'text');
-  });
 });

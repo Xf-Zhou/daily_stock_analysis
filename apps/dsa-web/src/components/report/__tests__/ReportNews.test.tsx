@@ -14,7 +14,7 @@ describe('ReportNews', () => {
     vi.clearAllMocks();
   });
 
-  it('renders news items and refreshes with preserved subpanel styling', async () => {
+  it('renders news items and refreshes with shared neutral surfaces', async () => {
     vi.mocked(historyApi.getNews).mockResolvedValue({
       total: 1,
       status: 'ok',
@@ -33,8 +33,8 @@ describe('ReportNews', () => {
 
     expect(await screen.findByText('茅台发布最新经营数据')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '跳转' })).toHaveAttribute('href', 'https://example.com/news');
-    expect(container.querySelector('.home-panel-card')).toBeTruthy();
-    expect(container.querySelector('.home-subpanel')).toBeTruthy();
+    expect(container.querySelector('[data-slot="card"]')).toBeTruthy();
+    expect(container.querySelector('[data-slot="news-item"]')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
 

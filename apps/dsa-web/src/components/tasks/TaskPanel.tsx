@@ -50,7 +50,7 @@ const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
         <div className="mt-2 flex items-center gap-2">
           <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/8">
             <div
-              className="h-full rounded-full bg-cyan transition-[width] duration-300 ease-out"
+              className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -124,7 +124,7 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
           title={title}
           titleClassName="text-sm font-medium"
           leading={(
-            <svg className="h-4 w-4 text-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-4 w-4 text-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"

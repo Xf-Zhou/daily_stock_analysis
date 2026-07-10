@@ -45,8 +45,8 @@ describe('LoginPage', () => {
 
     expect(await screen.findByText('两次输入的密码不一致')).toBeInTheDocument();
     expect(login).not.toHaveBeenCalled();
-    expect(screen.getByLabelText('管理员密码')).toHaveAttribute('data-appearance', 'login');
-    expect(screen.getByLabelText('确认密码')).toHaveAttribute('data-appearance', 'login');
+    expect(screen.getByLabelText('管理员密码')).toHaveAttribute('data-slot', 'input');
+    expect(screen.getByLabelText('确认密码')).toHaveAttribute('data-slot', 'input');
   });
 
   it('navigates to redirect after a successful login', async () => {
@@ -60,10 +60,10 @@ describe('LoginPage', () => {
     render(<LoginPage />);
 
     fireEvent.change(screen.getByLabelText('登录密码'), { target: { value: 'passwd6' } });
-    fireEvent.click(screen.getByRole('button', { name: '授权进入工作台' }));
+    fireEvent.click(screen.getByRole('button', { name: '登录' }));
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/settings', { replace: true }));
-    expect(screen.getByLabelText('登录密码')).toHaveAttribute('data-appearance', 'login');
+    expect(screen.getByLabelText('登录密码')).toHaveAttribute('data-slot', 'input');
   });
 
   it('shows MFA step before navigating when login requires MFA', async () => {
@@ -79,7 +79,7 @@ describe('LoginPage', () => {
     render(<LoginPage />);
 
     fireEvent.change(screen.getByLabelText('登录密码'), { target: { value: 'passwd6' } });
-    fireEvent.click(screen.getByRole('button', { name: '授权进入工作台' }));
+    fireEvent.click(screen.getByRole('button', { name: '登录' }));
 
     expect(await screen.findByLabelText('验证码或恢复码')).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
@@ -91,7 +91,7 @@ describe('LoginPage', () => {
     expect(navigate).toHaveBeenCalledWith('/settings', { replace: true });
   });
 
-  it('does not override login theme tokens inline so light mode can take effect', () => {
+  it('renders the shared neutral authentication surface', () => {
     useAuthMock.mockReturnValue({
       login: vi.fn(),
       loginMfa: vi.fn(),
@@ -103,6 +103,8 @@ describe('LoginPage', () => {
     const pageRoot = container.firstElementChild as HTMLElement | null;
 
     expect(pageRoot).not.toBeNull();
-    expect(pageRoot?.getAttribute('style') ?? '').not.toContain('--login-bg-main');
+    expect(pageRoot).toHaveClass('bg-muted/30');
+    expect(container.querySelector('[data-slot="login-card"]')).toHaveClass('border-border', 'bg-card');
+    expect(container.querySelector('canvas')).toBeNull();
   });
 });

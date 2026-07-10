@@ -13,7 +13,7 @@ const PageButton: React.FC<PageButtonProps> = ({ page, isActive, disabled, onCli
   const isEllipsis = page === '...';
 
   if (isEllipsis) {
-    return <span className="px-3 py-2 text-muted-text">...</span>;
+    return <span className="px-3 py-2 text-muted-foreground">...</span>;
   }
 
   return (
@@ -22,10 +22,10 @@ const PageButton: React.FC<PageButtonProps> = ({ page, isActive, disabled, onCli
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'inline-flex h-10 min-w-[2.5rem] items-center justify-center rounded-xl border px-3 text-sm font-medium transition-all duration-200',
+        'inline-flex h-10 min-w-[2.5rem] items-center justify-center rounded-md border px-3 text-sm font-medium transition-colors duration-200',
         isActive
-          ? 'border-cyan/30 bg-cyan text-slate-950 shadow-lg shadow-cyan/20'
-          : 'border-border/60 bg-elevated text-secondary-text hover:bg-hover hover:text-foreground',
+          ? 'border-primary bg-primary text-primary-foreground'
+          : 'border-input bg-background text-muted-foreground hover:bg-accent hover:text-foreground',
         disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
       )}
     >

@@ -20,17 +20,13 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
   value,
   tone,
 }) => (
-  <div className="home-subpanel home-strategy-card p-3" style={{ ['--home-strategy-tone' as string]: `var(${tone})` }}>
+  <div className="relative rounded-md border border-border border-l-2 bg-background p-3" style={{ borderLeftColor: `var(${tone})` }}>
     <div className="flex flex-col">
-      <span className="home-strategy-label mb-0.5 text-xs">{label}</span>
-      <span className="home-strategy-value text-lg font-bold font-mono" style={!value ? { color: 'var(--text-muted-text)' } : undefined}>
+      <span className="mb-0.5 text-xs text-muted-foreground">{label}</span>
+      <span className="font-mono text-lg font-semibold text-foreground" style={!value ? { color: 'var(--text-muted-text)' } : undefined}>
         {value || '—'}
       </span>
     </div>
-    <div
-      className="absolute bottom-0 left-0 right-0 h-0.5"
-      style={{ background: `linear-gradient(90deg, transparent, var(${tone}), transparent)` }}
-    />
   </div>
 );
 
@@ -69,7 +65,7 @@ export const ReportStrategy: React.FC<ReportStrategyProps> = ({ strategy, langua
   ];
 
   return (
-    <Card variant="bordered" padding="md" className="home-panel-card">
+    <Card variant="bordered" padding="md">
       <DashboardPanelHeader
         eyebrow={text.strategyPoints}
         title={text.sniperLevels}

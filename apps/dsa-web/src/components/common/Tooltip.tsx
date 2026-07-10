@@ -6,11 +6,13 @@ import { cn } from '../../utils/cn';
 interface TooltipProps {
   content: React.ReactNode;
   children: React.ReactNode;
-  side?: 'top' | 'bottom';
+  side?: TooltipSide;
   focusable?: boolean;
   className?: string;
   contentClassName?: string;
 }
+
+type TooltipSide = 'top' | 'bottom' | 'left' | 'right';
 
 type TooltipStyle = {
   top: number;
@@ -29,7 +31,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
   const tooltipRef = useRef<HTMLSpanElement | null>(null);
   const tooltipId = useId();
   const [open, setOpen] = useState(false);
-  const [resolvedSide, setResolvedSide] = useState<'top' | 'bottom'>(side);
+  const [resolvedSide, setResolvedSide] = useState<TooltipSide>(side);
   const [style, setStyle] = useState<TooltipStyle>({ top: 0, left: 0 });
 
   const updatePosition = useCallback(() => {
@@ -46,21 +48,41 @@ export const Tooltip: React.FC<TooltipProps> = ({
     const gap = 10;
     const margin = 8;
 
+    const getPosition = (positionSide: TooltipSide) => {
+      if (positionSide === 'left' || positionSide === 'right') {
+        return {
+          top: triggerRect.top + triggerRect.height / 2 - tooltipRect.height / 2,
+          left: positionSide === 'left'
+            ? triggerRect.left - tooltipRect.width - gap
+            : triggerRect.right + gap,
+        };
+      }
+
+      return {
+        top: positionSide === 'top'
+          ? triggerRect.top - tooltipRect.height - gap
+          : triggerRect.bottom + gap,
+        left: triggerRect.left + triggerRect.width / 2 - tooltipRect.width / 2,
+      };
+    };
+
     let nextSide = side;
-    let top =
-      side === 'top'
-        ? triggerRect.top - tooltipRect.height - gap
-        : triggerRect.bottom + gap;
+    let { top, left } = getPosition(nextSide);
 
     if (side === 'top' && top < margin) {
       nextSide = 'bottom';
-      top = triggerRect.bottom + gap;
     } else if (side === 'bottom' && top + tooltipRect.height > viewportHeight - margin) {
       nextSide = 'top';
-      top = triggerRect.top - tooltipRect.height - gap;
+    } else if (side === 'left' && left < margin) {
+      nextSide = 'right';
+    } else if (side === 'right' && left + tooltipRect.width > viewportWidth - margin) {
+      nextSide = 'left';
     }
 
-    let left = triggerRect.left + triggerRect.width / 2 - tooltipRect.width / 2;
+    if (nextSide !== side) {
+      ({ top, left } = getPosition(nextSide));
+    }
+
     left = Math.max(margin, Math.min(left, viewportWidth - tooltipRect.width - margin));
     top = Math.max(margin, Math.min(top, viewportHeight - tooltipRect.height - margin));
 
@@ -134,7 +156,10 @@ export const Tooltip: React.FC<TooltipProps> = ({
               }}
               className={cn(
                 'pointer-events-none z-[120] min-w-max max-w-[18rem] rounded-xl border border-border/70 bg-elevated/95 px-3 py-1.5 text-xs leading-5 text-foreground shadow-[0_16px_40px_rgba(3,8,20,0.18)] backdrop-blur-xl',
-                resolvedSide === 'top' ? 'origin-bottom' : 'origin-top',
+                resolvedSide === 'top' && 'origin-bottom',
+                resolvedSide === 'bottom' && 'origin-top',
+                resolvedSide === 'left' && 'origin-right',
+                resolvedSide === 'right' && 'origin-left',
                 contentClassName,
               )}
             >

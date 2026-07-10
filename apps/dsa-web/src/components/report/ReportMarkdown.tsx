@@ -4,6 +4,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { historyApi } from '../../api/history';
 import { Drawer } from '../common/Drawer';
+import { Button } from '../common/Button';
 import { Tooltip } from '../common/Tooltip';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
 import type { ReportLanguage } from '../../types/analysis';
@@ -109,14 +110,14 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
       <div className="flex items-center justify-between gap-3 mb-4">
         {/* Left: Icon + Title */}
         <div className="flex items-center gap-3 flex-1">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--home-action-report-bg)] text-[var(--home-action-report-text)]">
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-muted-foreground">
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
           </div>
           <div>
             <h2 className="text-base font-semibold text-foreground">{stockName || stockCode}</h2>
-            <p className="text-xs text-muted-text">{text.fullReport}</p>
+            <p className="text-xs text-muted-foreground">{text.fullReport}</p>
           </div>
         </div>
 
@@ -125,11 +126,12 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
           {/* Copy Markdown button */}
           <Tooltip content={text.copyMarkdownSource}>
             <span className="inline-flex">
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={handleCopyMarkdown}
                 disabled={isLoading || !content || copiedType !== null}
-                className="home-surface-button flex h-10 w-10 items-center justify-center rounded-lg text-secondary-text hover:text-foreground disabled:opacity-50"
+                className="h-10 w-10 p-0"
                 aria-label={text.copyMarkdownSource}
               >
                 {copiedType === 'markdown' ? (
@@ -141,18 +143,19 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
                   </svg>
                 )}
-              </button>
+              </Button>
             </span>
           </Tooltip>
 
           {/* Copy plain text button */}
           <Tooltip content={text.copyPlainText}>
             <span className="inline-flex">
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={handleCopyPlainText}
                 disabled={isLoading || !content || copiedType !== null}
-                className="home-surface-button flex h-10 w-10 items-center justify-center rounded-lg text-secondary-text hover:text-foreground disabled:opacity-50"
+                className="h-10 w-10 p-0"
                 aria-label={text.copyPlainText}
               >
                 {copiedType === 'text' ? (
@@ -164,7 +167,7 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                 )}
-              </button>
+              </Button>
             </span>
           </Tooltip>
         </div>
@@ -173,8 +176,8 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
       {/* Content */}
       {isLoading ? (
         <div className="flex flex-col items-center justify-center h-64">
-          <div className="home-spinner h-10 w-10 animate-spin border-[3px]" />
-          <p className="mt-4 text-secondary-text text-sm">{text.loadingReport}</p>
+          <div className="h-10 w-10 animate-spin rounded-full border-[3px] border-muted border-t-foreground" />
+          <p className="mt-4 text-sm text-muted-foreground">{text.loadingReport}</p>
         </div>
       ) : error ? (
         <div className="flex flex-col items-center justify-center h-64">
@@ -184,17 +187,17 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
             </svg>
           </div>
           <p className="text-danger text-sm">{error}</p>
-          <button
-            type="button"
+          <Button
+            variant="outline"
             onClick={handleClose}
-            className="home-surface-button mt-4 rounded-lg px-4 py-2 text-sm text-secondary-text"
+            className="mt-4"
           >
             {text.dismiss}
-          </button>
+          </Button>
         </div>
       ) : (
         <div
-          className="home-markdown-prose prose prose-invert prose-sm max-w-none
+          className="prose prose-sm max-w-none dark:prose-invert
             prose-headings:text-foreground prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-2
             prose-h1:text-xl
             prose-h2:text-lg
@@ -207,7 +210,7 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
             prose-table:border-collapse
             prose-hr:my-4
             prose-a:no-underline hover:prose-a:underline
-            prose-blockquote:text-secondary-text
+            prose-blockquote:text-muted-foreground
             whitespace-pre-line break-words
           "
         >
@@ -218,14 +221,13 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
       )}
 
       {/* Footer */}
-      <div className="home-divider mt-6 flex justify-end border-t pt-4">
-        <button
-          type="button"
+      <div className="mt-6 flex justify-end border-t border-border pt-4">
+        <Button
+          variant="outline"
           onClick={handleClose}
-          className="home-surface-button rounded-lg px-4 py-2 text-sm text-secondary-text hover:text-foreground"
         >
           {text.dismiss}
-        </button>
+        </Button>
       </div>
     </Drawer>
   );

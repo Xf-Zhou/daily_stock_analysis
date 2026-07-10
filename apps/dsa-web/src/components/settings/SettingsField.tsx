@@ -56,7 +56,7 @@ function renderFieldControl(
   controlId: string,
 ) {
   const schema = item.schema;
-  const commonClass = 'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  const commonClass = 'h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm transition-colors placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60';
   const controlType = schema?.uiControl ?? 'text';
   const isMultiValue = isMultiValueField(item);
 
@@ -207,9 +207,8 @@ export const SettingsField: React.FC<SettingsFieldProps> = ({
   return (
     <div
       className={cn(
-        'rounded-[1.15rem] border bg-[var(--settings-surface)] p-4 shadow-soft-card transition-[background-color,border-color,box-shadow] duration-200',
-        hasError ? 'border-danger/40 hover:border-danger/55' : 'border-[var(--settings-border)] hover:border-[var(--settings-border-strong)]',
-        'hover:bg-[var(--settings-surface-hover)]',
+        'rounded-md border bg-background p-4 transition-colors duration-200',
+        hasError ? 'border-danger/40 hover:border-danger/55' : 'border-border hover:bg-muted/30',
       )}
     >
       <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -235,7 +234,7 @@ export const SettingsField: React.FC<SettingsFieldProps> = ({
       </div>
 
       {description ? (
-        <p className="mb-3 max-w-full text-xs leading-5 text-muted-text">
+        <p className="mb-3 max-w-full text-xs leading-5 text-muted-foreground">
           {description}
         </p>
       ) : null}
@@ -253,7 +252,7 @@ export const SettingsField: React.FC<SettingsFieldProps> = ({
       </div>
 
       {schema?.isSensitive ? (
-        <p className="mt-3 text-[11px] leading-5 text-secondary-text">
+        <p className="mt-3 text-[11px] leading-5 text-muted-foreground">
           敏感内容默认隐藏，可点击眼睛图标查看明文。
           {isMultiValue ? ' 支持添加多个输入框进行增删。' : ''}
         </p>

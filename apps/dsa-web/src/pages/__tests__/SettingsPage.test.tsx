@@ -393,6 +393,8 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     expect(await screen.findByRole('heading', { name: '系统设置' })).toBeInTheDocument();
+    expect(screen.getByTestId('settings-workspace')).toHaveAttribute('data-layout', 'settings-workspace');
+    expect(screen.getByTestId('settings-toolbar')).toHaveAttribute('data-slot', 'toolbar');
     expect(screen.getByText('认证与登录保护')).toBeInTheDocument();
     expect(screen.getByText('修改密码')).toBeInTheDocument();
     expect(load).toHaveBeenCalled();

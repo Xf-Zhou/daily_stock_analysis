@@ -171,7 +171,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
   const capabilityBusy = capabilityState?.status === 'loading';
 
   return (
-    <div className="mb-2 overflow-hidden rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface)] shadow-soft-card transition-[background-color,border-color,box-shadow] duration-200 hover:border-[var(--settings-border-strong)] hover:bg-[var(--settings-surface-hover)]">
+    <div className="mb-2 overflow-hidden rounded-lg border border-border bg-background transition-colors duration-200 hover:bg-muted/30">
       <div
         className="flex cursor-pointer select-none items-center gap-2.5 px-4 py-3 transition-colors"
         onClick={() => onToggleExpand(index)}
@@ -257,7 +257,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
       </div>
 
       {expanded ? (
-        <div className="settings-surface-overlay-soft space-y-4 px-4 py-4">
+        <div className="space-y-4 border-t border-border bg-muted/20 px-4 py-4">
           <div className="grid gap-2 sm:grid-cols-2">
             <Input
               label="渠道名称"
@@ -1560,7 +1560,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
     <div className="space-y-4">
       <button
         type="button"
-        className="flex w-full items-center justify-between rounded-[1.35rem] border border-[var(--settings-border)] bg-[var(--settings-surface)] px-5 py-4 text-left shadow-soft-card transition-[background-color,border-color,box-shadow] duration-200 hover:border-[var(--settings-border-strong)] hover:bg-[var(--settings-surface-hover)]"
+        className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-5 py-4 text-left transition-colors duration-200 hover:bg-muted/40"
         onClick={() => setIsCollapsed((previous) => !previous)}
       >
         <div className="space-y-1">
@@ -1577,13 +1577,13 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
 
       {!isCollapsed ? (
         <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-          <div className="rounded-[1.35rem] border border-[var(--settings-border)] bg-[var(--settings-surface)] p-4 shadow-soft-card">
+          <div className="rounded-lg border border-border bg-background p-4">
             <div className="mb-3 flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-medium text-foreground">快速添加渠道</h4>
                 <p className="mt-1 text-xs text-secondary-text">先选择预设服务商，再一键创建配置草稿。</p>
               </div>
-              <Badge variant="default" className="border-[var(--settings-border)] bg-[var(--settings-surface-hover)] text-muted-text">{channels.length} 个渠道</Badge>
+              <Badge variant="default">{channels.length} 个渠道</Badge>
             </div>
             <div className="flex items-center gap-2">
               <Button type="button" variant="settings-primary" className="whitespace-nowrap" disabled={busy} onClick={addChannel}>
@@ -1612,7 +1612,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
             </div>
 
             {channels.length === 0 ? (
-              <div className="settings-surface-overlay-muted rounded-[1.35rem] border border-dashed settings-border-strong px-4 py-10 text-center">
+              <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-10 text-center">
                 <p className="text-sm font-medium text-secondary-text">还没有渠道</p>
                 <p className="mt-1 text-xs text-muted-text">选择服务商预设后点击“添加渠道”即可开始配置。</p>
               </div>
@@ -1640,13 +1640,13 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
           </div>
 
           {managesRuntimeConfig ? (
-            <div className="rounded-[1.35rem] border border-[var(--settings-border)] bg-[var(--settings-surface)] p-4 shadow-soft-card">
+            <div className="rounded-lg border border-border bg-background p-4">
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <span className="settings-accent-text text-xs font-medium uppercase tracking-wider">运行时参数</span>
                   <p className="mt-1 text-[11px] text-muted-text">主模型、备选模型、Vision 与 Temperature 会直接写入运行时配置。</p>
                 </div>
-                <Badge variant="default" className="border-[var(--settings-border)] bg-[var(--settings-surface-hover)] text-muted-text">Runtime</Badge>
+                <Badge variant="default">Runtime</Badge>
               </div>
               <div className="mb-4">
                 <label className="mb-1 block text-xs text-muted-text">Temperature</label>
@@ -1669,7 +1669,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
               </div>
 
               {availableModels.length === 0 ? (
-                <div className="rounded-xl border border-dashed settings-border-strong settings-surface-overlay-soft px-3 py-2 text-xs text-muted-text">
+                <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
                   先添加至少一个已启用渠道并填写模型，下面的主模型 / 备选模型 / Vision 选项才会出现。
                 </div>
               ) : (
@@ -1703,7 +1703,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
 
                   <div>
                     <label className="mb-2 block text-xs text-muted-text">备选模型</label>
-                    <div className="space-y-2 rounded-xl border settings-border-strong settings-surface-overlay-soft p-3">
+                    <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3">
                       {availableModels.map((model) => (
                         <label key={model} className="flex items-center gap-2 text-sm text-secondary-text">
                           <input
@@ -1740,7 +1740,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
             <InlineAlert
               variant="warning"
               message="检测到已配置高级模型路由 YAML：此处仅管理渠道条目和基础连接信息。运行时主模型 / 备选模型 / Vision / Temperature 仍由下方通用字段决定；若 YAML 解析成功，则以其中的路由与可用模型声明为准，本配置不会覆盖 YAML 文件本身。"
-              className="rounded-[1.35rem] px-4 py-3 text-xs shadow-none"
+              className="rounded-lg px-4 py-3 text-xs shadow-none"
             />
           )}
 

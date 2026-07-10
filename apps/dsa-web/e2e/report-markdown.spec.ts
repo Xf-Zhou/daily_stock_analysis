@@ -16,7 +16,7 @@ async function login(page: Page) {
   await page.locator('#password').fill(smokePassword!);
 
   // Wait for and click the submit button
-  const submitButton = page.getByRole('button', { name: /授权进入工作台|完成设置并登录/ });
+  const submitButton = page.getByRole('button', { name: /登录|完成设置并登录/ });
   await expect(submitButton).toBeVisible();
 
   await Promise.all([
@@ -49,7 +49,7 @@ test.describe('ReportMarkdown component', () => {
     await expect(page.getByText('历史分析')).toBeVisible({ timeout: 10_000 });
 
     // Click on the first history item to select it
-    const firstHistoryItem = page.locator('.home-history-item').first();
+    const firstHistoryItem = page.locator('[data-slot="history-item"]').first();
     await expect(firstHistoryItem).toBeVisible({ timeout: 10_000 });
     await firstHistoryItem.click();
     // Wait for detailed report button to be enabled (indicates selection is complete)
@@ -94,7 +94,7 @@ test.describe('ReportMarkdown component', () => {
     await expect(page.getByText('历史分析')).toBeVisible({ timeout: 10_000 });
 
     // Click on the first history item to select it
-    const firstHistoryItem = page.locator('.home-history-item').first();
+    const firstHistoryItem = page.locator('[data-slot="history-item"]').first();
     await expect(firstHistoryItem).toBeVisible({ timeout: 10_000 });
     await firstHistoryItem.click();
     // Wait for detailed report button to be enabled (indicates selection is complete)
@@ -176,7 +176,7 @@ test.describe('ReportMarkdown component', () => {
     await expect(page.getByText('历史分析')).toBeVisible({ timeout: 10_000 });
 
     // Click on the first history item to select it
-    const firstHistoryItem = page.locator('.home-history-item').first();
+    const firstHistoryItem = page.locator('[data-slot="history-item"]').first();
     await expect(firstHistoryItem).toBeVisible({ timeout: 10_000 });
     await firstHistoryItem.click();
     // Wait for detailed report button to be enabled (indicates selection is complete)

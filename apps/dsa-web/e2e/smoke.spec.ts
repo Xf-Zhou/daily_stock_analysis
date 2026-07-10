@@ -9,7 +9,7 @@ async function login(page: Page) {
   await page.waitForLoadState('domcontentloaded');
 
   const passwordInput = page.locator('#password');
-  const submitButton = page.getByRole('button', { name: /授权进入工作台|完成设置并登录/ });
+  const submitButton = page.getByRole('button', { name: /登录|完成设置并登录/ });
   const homeLink = page.getByRole('link', { name: '首页' });
 
   const isAlreadyAuthenticated =
@@ -44,14 +44,14 @@ test.describe('web smoke', () => {
     await page.waitForLoadState('domcontentloaded');
 
     // Check for branding
-    await expect(page.getByText('DAILY STOCK').first()).toBeVisible();
-    await expect(page.getByText('Analysis Engine')).toBeVisible();
+    await expect(page.getByText('每日股票分析')).toBeVisible();
+    await expect(page.getByText('投研工作台')).toBeVisible();
 
     // Check for password input
     await expect(page.locator('#password')).toBeVisible();
 
     // Check for submit button
-    await expect(page.getByRole('button', { name: /授权进入工作台|完成设置并登录/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /登录|完成设置并登录/ })).toBeVisible();
   });
 
   test('home page shows analysis entry and history panel after login', async ({ page }) => {
@@ -66,6 +66,52 @@ test.describe('web smoke', () => {
     await stockInput.fill('600519');
     const analyzeButton = page.getByRole('button', { name: '分析', exact: true });
     await expect(analyzeButton).toBeVisible();
+  });
+
+  test('collapsed desktop sidebar shows navigation help on hover and focus', async ({ page }) => {
+    await page.route('**/api/v1/**', async (route) => {
+      if (route.request().url().includes('/api/v1/auth/status')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            authEnabled: true,
+            loggedIn: true,
+            passwordSet: true,
+            passwordChangeable: true,
+            setupState: 'enabled',
+            mfaEnabled: false,
+            mfaRequired: false,
+            recoveryCodesRemaining: null,
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'smoke_test_unavailable' }),
+      });
+    });
+    await page.goto('/');
+    await page.waitForLoadState('domcontentloaded');
+
+    await page.getByRole('button', { name: '折叠侧边栏' }).click();
+    const expectVisibleHelp = async (trigger: ReturnType<typeof page.getByRole>, label: string) => {
+      await trigger.hover();
+      await expect(page.getByRole('tooltip', { name: label })).toBeVisible();
+      await page.mouse.move(800, 500);
+      await expect(page.getByRole('tooltip', { name: label })).not.toBeVisible();
+      await trigger.focus();
+      await expect(page.getByRole('tooltip', { name: label })).toBeVisible();
+      await trigger.blur();
+    };
+
+    await expectVisibleHelp(page.getByRole('link', { name: '首页' }), '首页');
+    await expectVisibleHelp(page.getByRole('button', { name: '切换主题' }), '主题');
+    await expectVisibleHelp(page.getByRole('button', { name: '退出' }), '退出');
+    await expectVisibleHelp(page.getByRole('button', { name: '展开侧边栏' }), '展开侧边栏');
   });
 
   test('chat page allows entering a question and starts a request', async ({ page }) => {

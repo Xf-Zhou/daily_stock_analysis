@@ -384,16 +384,16 @@ const CandidatePoolPage: React.FC = () => {
   }, []);
 
   return (
-    <AppPage className="space-y-4">
-      <section className="glass-panel-lg px-4 py-4">
+    <AppPage data-testid="candidate-page" className="max-w-[2160px] space-y-4">
+      <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="label-uppercase text-[10px]">CANDIDATES</span>
+              <span className="text-xs font-medium text-muted-foreground">规则选股</span>
               <Badge variant="info">规则评分</Badge>
             </div>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">推荐关注</h1>
-            <p className="mt-2 max-w-3xl text-sm text-secondary-text">
+            <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
               基于静态股票库和行情榜单生成候选池，仅用于发现值得进一步查看的标的，不构成投资建议。
             </p>
           </div>
@@ -405,22 +405,27 @@ const CandidatePoolPage: React.FC = () => {
         </div>
       </section>
 
-      <section className="glass-panel-lg px-4 py-3">
-        <div className="grid gap-3 md:grid-cols-[160px_minmax(220px,1fr)_220px_180px] xl:grid-cols-[160px_minmax(260px,1fr)_220px_180px_auto] xl:items-end">
+      <section data-testid="candidate-toolbar" data-slot="toolbar" className="rounded-lg border border-border bg-card p-4 shadow-sm">
+        <div
+          data-testid="candidate-filter-grid"
+          className="grid gap-3 md:grid-cols-[160px_minmax(220px,1fr)_220px_180px] xl:grid-cols-[160px_minmax(260px,1fr)_220px_180px_auto] xl:items-end 2xl:grid-cols-[160px_minmax(260px,720px)_220px_180px_auto] 2xl:justify-start"
+        >
           <Select
             label="市场"
             value={market}
             onChange={(value) => setMarket(value as CandidateMarket)}
             options={MARKET_OPTIONS}
           />
-          <Input
-            label="关键词"
-            type="search"
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder="代码、名称、拼音、别名"
-            trailingAction={<Search className="h-4 w-4 text-muted-text" />}
-          />
+          <div data-testid="candidate-search-field" className="w-full 2xl:max-w-[720px]">
+            <Input
+              label="关键词"
+              type="search"
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              placeholder="代码、名称、拼音、别名"
+              trailingAction={<Search className="h-4 w-4 text-muted-foreground" />}
+            />
+          </div>
           <Select
             label="行业"
             value={industry}
@@ -440,10 +445,10 @@ const CandidatePoolPage: React.FC = () => {
             aria-label="隐藏已自选"
             onClick={() => setHideWatchlisted((value) => !value)}
             className={cn(
-              'inline-flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-medium transition-all',
+              'inline-flex h-10 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors',
               hideWatchlisted
                 ? 'border-warning/35 bg-warning/12 text-warning'
-                : 'border-border/60 bg-elevated/45 text-secondary-text hover:bg-hover hover:text-foreground',
+                : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground',
             )}
           >
             <Star className="h-4 w-4" fill={hideWatchlisted ? 'currentColor' : 'none'} />
@@ -474,17 +479,17 @@ const CandidatePoolPage: React.FC = () => {
 
       <FloatingActionToast notice={actionNotice ?? watchlist.notice} />
 
-      <section className="glass-panel-lg px-4 py-4">
+      <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-base font-semibold text-foreground">候选股票</h2>
-            <span className="mt-1 block text-xs text-secondary-text">
+            <span className="mt-1 block text-xs text-muted-foreground">
               {candidatePool.items.length > 0
                 ? `显示 ${visibleStart}-${visibleEnd} / ${candidatePool.items.length}`
                 : '0 只'}
             </span>
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-secondary-text">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Filter className="h-4 w-4" />
             <span>{MARKET_OPTIONS.find((option) => option.value === market)?.label}</span>
             <span>{MODE_OPTIONS.find((option) => option.value === mode)?.label}</span>
@@ -494,14 +499,14 @@ const CandidatePoolPage: React.FC = () => {
         {loading ? (
           <div className="space-y-2">
             {Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="h-14 animate-pulse rounded-lg bg-elevated/40" />
+              <div key={index} className="h-14 animate-pulse rounded-lg bg-muted/50" />
             ))}
           </div>
         ) : visibleCandidates.length > 0 ? (
-          <div className="overflow-hidden rounded-xl border border-border/45 bg-base/20">
-            <div className="max-h-[620px] overflow-auto">
+          <div className="overflow-hidden rounded-lg border border-border bg-background">
+            <div data-testid="candidate-table-scroll" data-slot="data-table" role="region" aria-label="候选股票列表" className="max-h-[620px] overflow-auto">
               <table className="min-w-[1280px] w-full text-left text-sm">
-                <thead className="sticky top-0 z-10 border-b border-border/60 bg-card/95 text-xs uppercase text-muted-text backdrop-blur">
+                <thead className="sticky top-0 z-10 border-b border-border bg-muted/90 text-xs text-muted-foreground backdrop-blur">
                   <tr>
                     <th className="px-3 py-2 font-medium">关注分</th>
                     <th className="px-3 py-2 font-medium">股票</th>
@@ -516,32 +521,32 @@ const CandidatePoolPage: React.FC = () => {
                     <th className="w-[286px] px-3 py-2 text-right font-medium">操作</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border/45">
+                <tbody className="divide-y divide-border">
                   {visibleCandidates.map((item) => (
-                    <tr key={item.code} className="transition-colors hover:bg-hover/60">
+                    <tr key={item.code} className="transition-colors hover:bg-muted/60">
                       <td className="px-3 py-3">
-                        <div className="inline-flex h-9 w-12 items-center justify-center rounded-lg border border-cyan/25 bg-cyan/10 text-sm font-semibold text-cyan">
+                        <div className="inline-flex h-9 w-12 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
                           {item.score}
                         </div>
                       </td>
                       <td className="px-3 py-3">
                         <div className="font-medium text-foreground">{item.name}</div>
-                        <div className="font-mono text-xs text-muted-text">{item.displayCode}</div>
+                        <div className="font-mono text-xs text-muted-foreground">{item.displayCode}</div>
                       </td>
-                      <td className="px-3 py-3 text-secondary-text">
+                      <td className="px-3 py-3 text-muted-foreground">
                         {MARKET_OPTIONS.find((option) => option.value === item.market)?.label ?? item.market}
                       </td>
                       <td className="px-3 py-3">
                         <Badge variant={item.industry ? 'info' : 'default'}>{item.industry || '未分类'}</Badge>
                       </td>
-                      <td className="px-3 py-3 text-right text-secondary-text">
+                      <td className="px-3 py-3 text-right text-muted-foreground">
                         {formatNumber(item.price, { maximumFractionDigits: 3 })}
                       </td>
                       <td className={cn('px-3 py-3 text-right font-medium', getChangeClass(item.changePct))}>
                         {formatPct(item.changePct)}
                       </td>
-                      <td className="px-3 py-3 text-right text-secondary-text">{formatAmount(item.amount)}</td>
-                      <td className="px-3 py-3 text-right text-secondary-text">{formatAmount(item.volume)}</td>
+                      <td className="px-3 py-3 text-right text-muted-foreground">{formatAmount(item.amount)}</td>
+                      <td className="px-3 py-3 text-right text-muted-foreground">{formatAmount(item.volume)}</td>
                       <td className="px-3 py-3">
                         <Badge variant={QUOTE_STATUS_META[item.quoteStatus].variant}>
                           {QUOTE_STATUS_META[item.quoteStatus].label}
@@ -604,7 +609,7 @@ const CandidatePoolPage: React.FC = () => {
               </table>
             </div>
             {totalPages > 1 ? (
-              <div className="border-t border-border/45 bg-card/80 px-3 py-3">
+              <div className="border-t border-border bg-muted/30 px-3 py-3">
                 <Pagination
                   currentPage={clampedPage}
                   totalPages={totalPages}

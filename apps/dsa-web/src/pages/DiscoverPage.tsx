@@ -301,12 +301,12 @@ const DiscoverPage: React.FC = () => {
     : '';
 
   return (
-    <AppPage className="space-y-4">
-      <section data-testid="discover-compact-toolbar" className="glass-panel-lg px-4 py-3">
+    <AppPage data-testid="discover-page" className="max-w-[2160px] space-y-4">
+      <section data-testid="discover-compact-toolbar" data-slot="toolbar" className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="label-uppercase text-[10px]">DISCOVER</span>
+              <span className="text-xs font-medium text-muted-foreground">市场研究</span>
               <h1 className="text-2xl font-semibold tracking-tight text-foreground">股票发现</h1>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -317,10 +317,10 @@ const DiscoverPage: React.FC = () => {
                 disabled={watchlistFilterDisabled}
                 onClick={() => setWatchlistOnly((value) => !value)}
                 className={cn(
-                  'inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all',
+                  'inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors',
                   watchlistOnly
                     ? 'border-warning/35 bg-warning/12 text-warning'
-                    : 'border-border/60 bg-elevated/45 text-secondary-text hover:bg-hover hover:text-foreground',
+                    : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground',
                   watchlistFilterDisabled ? 'cursor-not-allowed opacity-50' : ''
                 )}
               >
@@ -334,21 +334,26 @@ const DiscoverPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-[160px_minmax(220px,1fr)_220px] xl:grid-cols-[160px_minmax(260px,1fr)_220px_minmax(360px,0.7fr)] xl:items-end">
+          <div
+            data-testid="discover-filter-grid"
+            className="grid gap-3 md:grid-cols-[160px_minmax(220px,1fr)_220px] xl:grid-cols-[160px_minmax(260px,1fr)_220px_minmax(360px,0.7fr)] xl:items-end 2xl:grid-cols-[160px_minmax(260px,720px)_220px_minmax(360px,1fr)]"
+          >
             <Select
               label="市场"
               value={market}
               onChange={(value) => setMarket(value as DiscoverMarket)}
               options={MARKET_OPTIONS}
             />
-            <Input
-              label="关键词"
-              type="search"
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              placeholder="代码、名称、拼音、别名"
-              trailingAction={<Search className="h-4 w-4 text-muted-text" />}
-            />
+            <div data-testid="discover-search-field" className="w-full 2xl:max-w-[720px]">
+              <Input
+                label="关键词"
+                type="search"
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="代码、名称、拼音、别名"
+                trailingAction={<Search className="h-4 w-4 text-muted-foreground" />}
+              />
+            </div>
             <Select
               label="行业"
               value={industry}
@@ -383,7 +388,7 @@ const DiscoverPage: React.FC = () => {
 
       <FloatingActionToast notice={actionNotice ?? watchlist.notice} />
 
-      <section className="glass-panel-lg px-4 py-4">
+      <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-2">
             {RANKING_TABS.map(({ key, label, icon: Icon }) => (
@@ -392,10 +397,10 @@ const DiscoverPage: React.FC = () => {
                 type="button"
                 onClick={() => setRankingKey(key)}
                 className={cn(
-                  'inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-all',
+                  'inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors',
                   rankingKey === key
-                    ? 'border-cyan/35 bg-cyan/12 text-cyan'
-                    : 'border-border/60 bg-elevated/35 text-secondary-text hover:bg-hover hover:text-foreground'
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground'
                 )}
               >
                 <Icon className="h-4 w-4" />
@@ -403,7 +408,7 @@ const DiscoverPage: React.FC = () => {
               </button>
             ))}
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-secondary-text">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
             {market === 'US' ? <Badge variant="info">核心池</Badge> : null}
             {rankingUpdatedAt ? <span>{new Date(rankingUpdatedAt).toLocaleString('zh-CN')}</span> : null}
@@ -419,7 +424,7 @@ const DiscoverPage: React.FC = () => {
         <div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
           {rankingLoading ? (
             Array.from({ length: 4 }).map((_, index) => (
-              <div key={index} className="h-28 animate-pulse rounded-lg border border-border/50 bg-elevated/35" />
+              <div key={index} className="h-28 animate-pulse rounded-lg border border-border bg-muted/50" />
             ))
           ) : rankings.length > 0 ? (
             rankings.slice(0, 8).map((item, index) => (
@@ -449,11 +454,11 @@ const DiscoverPage: React.FC = () => {
         </div>
       </section>
 
-      <section className="glass-panel-lg px-4 py-4">
+      <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-base font-semibold text-foreground">可关注股票</h2>
-            <span className="mt-1 block text-xs text-secondary-text">
+            <span className="mt-1 block text-xs text-muted-foreground">
               {filteredStocks.length > 0
                 ? `显示 ${visibleStart}-${visibleEnd} / ${filteredStocks.length}`
                 : '0 只'}
@@ -472,14 +477,14 @@ const DiscoverPage: React.FC = () => {
         {loading ? (
           <div className="space-y-2">
             {Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="h-12 animate-pulse rounded-lg bg-elevated/40" />
+              <div key={index} className="h-12 animate-pulse rounded-lg bg-muted/50" />
             ))}
           </div>
         ) : visibleStocks.length > 0 ? (
-          <div className="overflow-hidden rounded-xl border border-border/45 bg-base/20">
-            <div data-testid="discover-stock-table-scroll" className="max-h-[520px] overflow-auto">
+          <div className="overflow-hidden rounded-lg border border-border bg-background">
+            <div data-testid="discover-stock-table-scroll" data-slot="data-table" role="region" aria-label="可关注股票列表" className="max-h-[520px] overflow-auto">
               <table className="min-w-[860px] w-full text-left text-sm">
-                <thead className="sticky top-0 z-10 border-b border-border/60 bg-card/95 text-xs uppercase text-muted-text backdrop-blur">
+                <thead className="sticky top-0 z-10 border-b border-border bg-muted/90 text-xs text-muted-foreground backdrop-blur">
                   <tr>
                     <th className="px-3 py-2 font-medium">代码</th>
                     <th className="px-3 py-2 font-medium">名称</th>
@@ -488,15 +493,15 @@ const DiscoverPage: React.FC = () => {
                     <th className="w-[292px] px-3 py-2 text-right font-medium">操作</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border/45">
+                <tbody className="divide-y divide-border">
                   {visibleStocks.map((item) => (
-                    <tr key={item.canonicalCode} className="transition-colors hover:bg-hover/60">
+                    <tr key={item.canonicalCode} className="transition-colors hover:bg-muted/60">
                       <td className="px-3 py-3 font-mono text-sm text-foreground">{item.displayCode}</td>
                       <td className="px-3 py-3">
                         <div className="font-medium text-foreground">{item.nameZh}</div>
-                        <div className="text-xs text-muted-text">{item.canonicalCode}</div>
+                        <div className="text-xs text-muted-foreground">{item.canonicalCode}</div>
                       </td>
-                      <td className="px-3 py-3 text-secondary-text">
+                      <td className="px-3 py-3 text-muted-foreground">
                         {MARKET_OPTIONS.find((option) => option.value === item.market)?.label ?? item.market}
                       </td>
                       <td className="px-3 py-3">
@@ -550,7 +555,7 @@ const DiscoverPage: React.FC = () => {
               </table>
             </div>
             {totalStockPages > 1 ? (
-              <div className="border-t border-border/45 bg-card/80 px-3 py-3">
+              <div className="border-t border-border bg-muted/30 px-3 py-3">
                 <Pagination
                   currentPage={clampedStockPage}
                   totalPages={totalStockPages}
@@ -581,8 +586,8 @@ type CompactMetricProps = {
 };
 
 const CompactMetric: React.FC<CompactMetricProps> = ({ label, value }) => (
-  <div className="min-w-0 rounded-lg border border-border/55 bg-elevated/30 px-3 py-2">
-    <div className="truncate text-[11px] leading-4 text-muted-text">{label}</div>
+  <div data-slot="stat-card" className="min-w-0 rounded-md border border-border bg-background px-3 py-2">
+    <div className="truncate text-[11px] leading-4 text-muted-foreground">{label}</div>
     <div className="truncate text-sm font-semibold leading-5 text-foreground">{value}</div>
   </div>
 );
@@ -611,7 +616,7 @@ const FloatingActionToast: React.FC<FloatingActionToastProps> = ({ notice }) => 
     >
       <div
         className={cn(
-          'rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-xl',
+          'rounded-lg border px-4 py-3 shadow-lg',
           TOAST_VARIANT_STYLES[notice.variant],
         )}
       >
@@ -651,7 +656,7 @@ const RankingTile: React.FC<RankingTileProps> = ({
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-cyan/12 text-xs font-semibold text-cyan">
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">
             {rank}
           </span>
           <span className="truncate text-sm font-semibold text-foreground">{item.name}</span>

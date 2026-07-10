@@ -251,14 +251,14 @@ export const AuthSettingsCard: React.FC = () => {
         <Badge
           variant={authEnabled ? 'success' : 'default'}
           size="sm"
-          className={authEnabled ? '' : 'border-[var(--settings-border)] bg-[var(--settings-surface-hover)] text-secondary-text'}
+          className={authEnabled ? '' : 'border-border bg-muted text-muted-foreground'}
         >
           {authEnabled ? '已启用' : '未启用'}
         </Badge>
       }
     >
       <form className="space-y-4" onSubmit={handleSubmit}>
-        <div className="rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface)] p-4 shadow-soft-card transition-[background-color,border-color] duration-200 hover:border-[var(--settings-border-strong)] hover:bg-[var(--settings-surface-hover)]">
+        <div className="rounded-md border border-border bg-background p-4 transition-colors duration-200 hover:bg-muted/30">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-1">
               <p className="text-sm font-semibold text-foreground">管理员认证</p>
@@ -269,13 +269,13 @@ export const AuthSettingsCard: React.FC = () => {
               disabled={isSubmitting}
               label={desiredEnabled ? '开启' : '关闭'}
               onChange={(event) => setDesiredEnabled(event.target.checked)}
-              containerClassName="rounded-full border border-[var(--settings-border)] bg-[var(--settings-surface-hover)] px-4 py-2 shadow-soft-card transition-[background-color,border-color] duration-200 hover:border-[var(--settings-border-strong)] hover:bg-[var(--settings-surface)]"
+              containerClassName="rounded-md border border-border bg-muted px-4 py-2 transition-colors duration-200 hover:bg-accent"
             />
           </div>
         </div>
 
         {settingsMfaPending ? (
-          <div className="rounded-xl border border-[var(--settings-border-strong)] bg-[var(--settings-surface-hover)] p-4">
+          <div className="rounded-md border border-border bg-muted/30 p-4">
             <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
               <KeyRound className="h-4 w-4 text-[var(--settings-accent)]" />
               <span>完成 MFA 验证</span>

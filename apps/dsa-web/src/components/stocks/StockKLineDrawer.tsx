@@ -182,7 +182,7 @@ export const StockKLineDrawer: React.FC<StockKLineDrawerProps> = ({
       side="right"
     >
       <div className="space-y-4">
-        <div className="flex flex-col gap-3 rounded-xl border border-border/50 bg-elevated/35 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="info">日 K</Badge>
@@ -200,10 +200,10 @@ export const StockKLineDrawer: React.FC<StockKLineDrawerProps> = ({
                   type="button"
                   onClick={() => setDays(option)}
                   className={cn(
-                    'inline-flex h-8 items-center rounded-lg border px-3 text-sm font-medium transition-colors',
+                    'inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium transition-colors',
                     days === option
-                      ? 'border-cyan/35 bg-cyan/12 text-cyan'
-                      : 'border-border/60 bg-card/70 text-secondary-text hover:bg-hover hover:text-foreground',
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground',
                   )}
                 >
                   {option} 天
@@ -214,7 +214,7 @@ export const StockKLineDrawer: React.FC<StockKLineDrawerProps> = ({
                 aria-label="刷新 K 线"
                 onClick={() => loadHistory(true)}
                 disabled={visibleLoading}
-                className="inline-flex h-8 items-center gap-1 rounded-lg border border-border/60 bg-card/70 px-3 text-sm font-medium text-secondary-text transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-background px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCw className={cn('h-3.5 w-3.5', visibleLoading && 'animate-spin')} />
                 刷新
@@ -248,8 +248,8 @@ export const StockKLineDrawer: React.FC<StockKLineDrawerProps> = ({
         ) : null}
 
         {visibleLoading ? (
-          <div className="flex h-[420px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/60 bg-base/25 text-secondary-text">
-            <RefreshCw className="h-6 w-6 animate-spin text-cyan" />
+          <div className="flex h-[420px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-muted/20 text-muted-foreground">
+            <RefreshCw className="h-6 w-6 animate-spin text-foreground" />
             <span className="text-sm">正在加载 K 线...</span>
           </div>
         ) : visibleData.length > 0 ? (

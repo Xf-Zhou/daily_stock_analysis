@@ -37,18 +37,18 @@ export const DashboardStateBlock: React.FC<DashboardStateBlockProps> = ({
       )}
     >
       {loading ? (
-        <div className="home-spinner h-6 w-6 animate-spin border-2" aria-hidden="true" />
+        <div data-slot="loading-spinner" className="h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-foreground" aria-hidden="true" />
       ) : icon ? (
-        <div className="home-state-icon-muted flex h-11 w-11 items-center justify-center rounded-full bg-subtle">
+        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
           {icon}
         </div>
       ) : null}
       <div className="space-y-1">
-        <TitleTag className={cn('text-secondary-text', compact ? 'text-xs' : 'text-sm', titleClassName)}>
+        <TitleTag className={cn('text-muted-foreground', compact ? 'text-xs' : 'text-sm', titleClassName)}>
           {title}
         </TitleTag>
         {description ? (
-          <p className={cn('mx-auto max-w-xs text-secondary-text', compact ? 'text-label' : 'text-xs', descriptionClassName)}>
+          <p className={cn('mx-auto max-w-xs text-muted-foreground', compact ? 'text-xs' : 'text-xs', descriptionClassName)}>
             {description}
           </p>
         ) : null}

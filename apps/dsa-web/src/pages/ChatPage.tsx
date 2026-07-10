@@ -448,7 +448,7 @@ const ChatPage: React.FC = () => {
     <div className="flex flex-row-reverse gap-4">
       <div className="h-8 w-8 flex-shrink-0" aria-hidden="true" />
       <div
-        className="w-full max-w-[min(100%,48rem)] rounded-xl border border-cyan/25 bg-cyan/5 px-3.5 py-3 text-sm shadow-none"
+        className="w-full max-w-[min(100%,48rem)] rounded-lg border border-border bg-muted/30 px-3.5 py-3 text-sm shadow-none"
         data-testid="chat-session-context-card"
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -508,7 +508,7 @@ const ChatPage: React.FC = () => {
           </div>
         </div>
         {contextDetailsExpanded && hasContextDetails ? (
-          <div className="mt-3 grid gap-3 border-t border-cyan/15 pt-3 text-xs text-secondary-text sm:grid-cols-2">
+          <div className="mt-3 grid gap-3 border-t border-border pt-3 text-xs text-muted-foreground sm:grid-cols-2">
             {summaryDetailRows.length > 0 ? (
               <div className="space-y-2">
                 <div className="font-semibold text-foreground">上次分析</div>
@@ -697,8 +697,8 @@ const ChatPage: React.FC = () => {
 
   const sidebarContent = (
     <>
-      <div className="flex items-center justify-between border-b border-white/5 bg-white/2 p-3.5">
-        <h2 className="text-sm font-semibold text-cyan uppercase tracking-[0.2em] flex items-center gap-2">
+      <div className="flex items-center justify-between border-b border-border bg-muted/30 p-3.5">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
@@ -706,7 +706,7 @@ const ChatPage: React.FC = () => {
         </h2>
         <button
           onClick={handleStartNewChat}
-          className="rounded-lg p-1.5 text-muted-text transition-all hover:bg-white/10 hover:text-foreground"
+          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           aria-label="开启新对话"
         >
           <svg
@@ -801,10 +801,11 @@ const ChatPage: React.FC = () => {
   return (
     <div
       data-testid="chat-workspace"
+      data-layout="chat-workspace"
       className="flex h-[calc(100vh-5rem)] w-full min-w-0 gap-4 overflow-hidden sm:h-[calc(100vh-5.5rem)] lg:h-[calc(100vh-2rem)]"
     >
       {/* Desktop sidebar */}
-      <div className="hidden h-full w-64 flex-shrink-0 flex-col overflow-hidden rounded-[1.25rem] border border-white/8 bg-card/82 shadow-soft-card md:flex">
+      <div data-testid="chat-desktop-sidebar" data-slot="conversation-sidebar" className="hidden h-full w-64 flex-shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm md:flex">
         {sidebarContent}
       </div>
 
@@ -816,7 +817,8 @@ const ChatPage: React.FC = () => {
         >
           <div className="page-drawer-overlay absolute inset-0" />
           <div
-            className="absolute left-0 top-0 bottom-0 w-72 flex flex-col glass-card overflow-hidden border-r border-white/10 bg-card/90 shadow-2xl"
+            data-slot="conversation-sidebar"
+            className="absolute bottom-0 left-0 top-0 flex w-72 flex-col overflow-hidden border-r border-border bg-card shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             {sidebarContent}
@@ -843,7 +845,7 @@ const ChatPage: React.FC = () => {
             <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="md:hidden p-1.5 -ml-1 rounded-lg hover:bg-hover transition-colors text-secondary-text hover:text-foreground"
+                className="-ml-1 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
                 aria-label="历史对话"
               >
                 <svg
@@ -861,7 +863,7 @@ const ChatPage: React.FC = () => {
                 </svg>
               </button>
               <svg
-                className="w-6 h-6 text-cyan"
+                className="h-6 w-6 text-foreground"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -970,7 +972,7 @@ const ChatPage: React.FC = () => {
               </div>
             )}
           </div>
-          <p className="text-secondary-text text-sm">
+          <p className="text-sm text-muted-foreground">
             向 AI 询问个股分析，获取基于技能视角的交易建议与实时决策报告。
           </p>
           {sendToast ? (
@@ -983,7 +985,7 @@ const ChatPage: React.FC = () => {
           ) : null}
         </header>
 
-        <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden border border-white/6 bg-card/78 glass-card">
+        <div data-slot="message-list" className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
           {/* Messages */}
           <ScrollArea
             className="relative z-10 flex-1"
@@ -1040,16 +1042,16 @@ const ChatPage: React.FC = () => {
                   >
                     <div
                       className={cn(
-                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold shadow-sm transition-all',
-                        msg.role === 'user' ? 'chat-avatar-user' : 'chat-avatar-ai'
+                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold transition-colors',
+                        msg.role === 'user' ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-muted text-foreground'
                       )}
                     >
                       {msg.role === 'user' ? 'U' : 'AI'}
                     </div>
                     <div
                       className={cn(
-                        'group/message min-w-0 w-fit max-w-[min(100%,48rem)] overflow-hidden px-5 py-3.5 transition-colors',
-                        msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'
+                        'group/message min-w-0 w-fit max-w-[min(100%,48rem)] overflow-hidden rounded-lg border px-5 py-3.5 transition-colors',
+                        msg.role === 'user' ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-muted/40 text-foreground'
                       )}
                     >
                       {msg.role === 'assistant' && skillLabel && (
@@ -1124,16 +1126,16 @@ const ChatPage: React.FC = () => {
 
             {loading && (
               <div className="flex gap-4">
-                <div className="w-8 h-8 rounded-full bg-elevated text-foreground flex items-center justify-center flex-shrink-0 text-xs font-bold">
+                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-semibold text-foreground">
                   AI
                 </div>
-                <div className="min-w-[200px] max-w-[min(100%,48rem)] overflow-hidden rounded-2xl rounded-tl-sm border border-white/6 bg-card/72 px-5 py-4">
-                  <div className="flex items-center gap-2.5 text-sm text-secondary-text">
+                <div className="min-w-[200px] max-w-[min(100%,48rem)] overflow-hidden rounded-lg border border-border bg-muted/40 px-5 py-4">
+                  <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
                     <div className="relative w-4 h-4 flex-shrink-0">
-                      <div className="absolute inset-0 rounded-full border-2 border-cyan/20" />
-                      <div className="absolute inset-0 rounded-full border-2 border-cyan border-t-transparent animate-spin" />
+                      <div className="absolute inset-0 rounded-full border-2 border-muted" />
+                      <div className="absolute inset-0 animate-spin rounded-full border-2 border-foreground border-t-transparent" />
                     </div>
-                    <span className="text-secondary-text">
+                    <span className="text-muted-foreground">
                       {getCurrentStage(progressSteps)}
                     </span>
                   </div>
@@ -1148,7 +1150,7 @@ const ChatPage: React.FC = () => {
             <div className="pointer-events-none absolute bottom-[5.75rem] right-4 z-20 md:bottom-24 md:right-6">
               <button
                 type="button"
-                className="pointer-events-auto chat-copy-btn shadow-soft-card"
+                className="pointer-events-auto rounded-md border border-border bg-card px-3 py-1.5 text-xs text-foreground shadow-sm hover:bg-accent"
                 onClick={() => {
                   requestScrollToBottom('smooth');
                   scrollToBottom('smooth');
@@ -1174,7 +1176,7 @@ const ChatPage: React.FC = () => {
           )}
 
           {/* Input area */}
-          <div className="border-t border-white/6 bg-card/88 p-4 md:p-6 relative z-20">
+          <div data-testid="chat-composer" data-slot="composer" className="relative z-20 border-t border-border bg-card p-4 md:p-6">
             <div className="space-y-3">
               {chatError ? <ApiErrorAlert error={chatError} /> : null}
               {isFollowUpContextLoading ? (
@@ -1187,7 +1189,7 @@ const ChatPage: React.FC = () => {
               ) : null}
             {skills.length > 0 && (
               <div className="flex flex-wrap items-start gap-x-5 gap-y-2">
-                <span className="text-xs text-muted-text font-medium uppercase tracking-wider flex-shrink-0 mt-1">
+                <span className="mt-1 flex-shrink-0 text-xs font-medium text-muted-foreground">
                   策略
                 </span>
                 <label className="flex items-center gap-1.5 text-sm cursor-pointer group mt-0.5">
@@ -1243,13 +1245,14 @@ const ChatPage: React.FC = () => {
 
               <div className="flex items-end gap-3">
                 <textarea
+                  data-slot="input"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="例如：分析 600519 / 茅台现在适合买入吗？ (Enter 发送, Shift+Enter 换行)"
                   disabled={loading || isContextBusy}
                   rows={1}
-                  className="input-surface input-focus-glow flex-1 min-h-[44px] max-h-[200px] rounded-xl border bg-transparent px-4 py-2.5 text-sm transition-all focus:outline-none resize-none disabled:cursor-not-allowed disabled:opacity-60"
+                  className="min-h-[44px] max-h-[200px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2.5 text-sm text-foreground shadow-sm transition-colors placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
                   style={{ height: 'auto' }}
                   onInput={(e) => {
                     const t = e.target as HTMLTextAreaElement;
@@ -1262,7 +1265,7 @@ const ChatPage: React.FC = () => {
                   onClick={() => handleSend()}
                   disabled={!input.trim() || loading || isContextBusy}
                   isLoading={loading || isContextBusy}
-                  className="btn-primary flex-shrink-0"
+                  className="flex-shrink-0"
                 >
                   发送
                 </Button>

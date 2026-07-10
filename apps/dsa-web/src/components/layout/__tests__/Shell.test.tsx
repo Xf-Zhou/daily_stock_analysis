@@ -35,7 +35,7 @@ beforeAll(() => {
 });
 
 describe('Shell', () => {
-  it.skip('renders navigation, theme toggle and completion badge', () => {
+  it('renders navigation, theme toggle and completion badge', () => {
     render(
       <MemoryRouter initialEntries={['/chat']}>
         <ThemeProvider>
@@ -54,7 +54,7 @@ describe('Shell', () => {
     expect(logoutButton).toHaveClass('cursor-pointer');
   });
 
-  it.skip('opens the theme menu from the sidebar toggle', async () => {
+  it('opens the theme menu from the sidebar toggle', async () => {
     render(
       <MemoryRouter initialEntries={['/chat']}>
         <ThemeProvider>
@@ -86,5 +86,23 @@ describe('Shell', () => {
     expect(await screen.findByRole('heading', { name: '退出登录' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '确认退出' }));
     expect(mockLogout).toHaveBeenCalled();
+  });
+
+  it('toggles the desktop sidebar between expanded and collapsed states', () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/']}>
+        <ThemeProvider>
+          <Shell>
+            <div>page content</div>
+          </Shell>
+        </ThemeProvider>
+      </MemoryRouter>,
+    );
+
+    const sidebar = container.querySelector('[data-slot="app-sidebar"]');
+    expect(sidebar).toHaveAttribute('data-collapsed', 'false');
+    fireEvent.click(screen.getByRole('button', { name: '折叠侧边栏' }));
+    expect(sidebar).toHaveAttribute('data-collapsed', 'true');
+    expect(screen.getByRole('button', { name: '展开侧边栏' })).toBeInTheDocument();
   });
 });

@@ -5,11 +5,12 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('index.html theme bootstrap', () => {
-  it('preloads dark mode before React mounts and respects stored theme values', () => {
+  it('preloads stored and system themes before React mounts with a light fallback', () => {
     const indexHtml = readFileSync(resolve(__dirname, '..', 'index.html'), 'utf8');
 
     expect(indexHtml).toContain("const storageKey = 'theme'");
-    expect(indexHtml).toContain("const theme = storedTheme === 'light' || storedTheme === 'dark' ? storedTheme : 'dark';");
+    expect(indexHtml).toContain("const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';");
+    expect(indexHtml).toContain("storedTheme === 'system' ? systemTheme : 'light'");
     expect(indexHtml).toContain("root.classList.remove('light', 'dark');");
     expect(indexHtml).toContain('root.classList.add(theme);');
     expect(indexHtml).toContain('root.style.colorScheme = theme;');

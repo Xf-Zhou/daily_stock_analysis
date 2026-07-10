@@ -1,6 +1,5 @@
 import type React from 'react';
 import { useState, useEffect, useRef } from 'react';
-import { useTheme } from 'next-themes';
 import { getSentimentLabel, type ReportLanguage } from '../../types/analysis';
 import { cn } from '../../utils/cn';
 import { normalizeReportLanguage, getReportText } from '../../utils/reportLanguage';
@@ -24,7 +23,7 @@ type GaugeVisualStyle = {
 };
 
 /**
- * Sentiment score gauge with an animated glowing ring.
+ * Sentiment score gauge with an animated semantic ring.
  * Dynamically calculates colors based on sentiment score.
  */
 export const ScoreGauge: React.FC<ScoreGaugeProps> = ({
@@ -39,8 +38,6 @@ export const ScoreGauge: React.FC<ScoreGaugeProps> = ({
   const [displayScore, setDisplayScore] = useState(0);
   const animationRef = useRef<number | null>(null);
   const prevScoreRef = useRef(0);
-  const { resolvedTheme } = useTheme();
-  const isDark = resolvedTheme === 'dark';
 
   // Animate transitions between score updates.
   useEffect(() => {
@@ -96,25 +93,15 @@ export const ScoreGauge: React.FC<ScoreGaugeProps> = ({
   const progress = (animatedScore / 100) * arcLength;
 
   // Sentiment colors - dynamically computed based on score thresholds.
-  // Light theme uses a restrained glow; dark theme keeps the stronger terminal-style glow.
   const sentimentConfig = {
     greed: {
-      color: '#00d4ff',       // Cyan
-      glowFilter: 'rgba(0, 212, 255, 0.66)',
-      lightColor: '#22d3ee',  // Lighter cyan
-      lightEndColor: '#0891b2', // Darker cyan
+      color: '#16a34a',
     },
     neutral: {
-      color: '#a855f7',       // Purple
-      glowFilter: 'rgba(168, 85, 247, 0.66)',
-      lightColor: '#c084fc',  // Lighter purple
-      lightEndColor: '#9333ea', // Darker purple
+      color: '#71717a',
     },
     fear: {
-      color: '#ff4466',       // Red
-      glowFilter: 'rgba(255, 68, 102, 0.66)',
-      lightColor: '#fb7185',  // Lighter rose
-      lightEndColor: '#e11d48', // Darker rose
+      color: '#dc2626',
     },
   };
 
@@ -128,26 +115,16 @@ export const ScoreGauge: React.FC<ScoreGaugeProps> = ({
   const sentimentKey = getSentimentKey(animatedScore);
   const colors = sentimentConfig[sentimentKey];
   const uniqueId = `${sentimentKey}-${score}-${animatedScore.toFixed(0)}`;
-  const gaugeTheme: GaugeVisualStyle = isDark
-    ? {
-        svgFilter: `drop-shadow(0 0 12px ${colors.glowFilter})`,
-        glowBlur: 4,
-        glowOpacity: 0.3,
-        glowStrokeExtra: gap,
-        valueTextShadow: `0 0 30px ${colors.glowFilter}`,
-      }
-    : {
-        svgFilter: `drop-shadow(0 0 8px ${colors.glowFilter.replace('0.66', '0.28')})`,
-        glowBlur: 3.4,
-        glowOpacity: 0.26,
-        glowStrokeExtra: Math.max(3, gap * 0.55),
-        valueTextShadow: `0 0 16px ${colors.glowFilter.replace('0.66', '0.22')}`,
-      };
+  const gaugeTheme: GaugeVisualStyle = {
+    glowBlur: 0,
+    glowOpacity: 0,
+    glowStrokeExtra: gap,
+  };
 
   return (
     <div className={cn('flex flex-col items-center', className)}>
       {showLabel && (
-        <span className="label-uppercase mb-3 text-secondary-text">
+        <span className="mb-3 text-xs font-medium text-muted-foreground">
           {text.fearGreedIndex}
         </span>
       )}
@@ -160,19 +137,9 @@ export const ScoreGauge: React.FC<ScoreGaugeProps> = ({
           style={gaugeTheme.svgFilter ? { filter: gaugeTheme.svgFilter } : {}}
         >
           <defs>
-            {/* Gradient definition - dark: glow gradient; light: clean gradient */}
             <linearGradient id={`gauge-gradient-${uniqueId}`} x1="0%" y1="0%" x2="100%" y2="100%">
-              {isDark ? (
-                <>
-                  <stop offset="0%" stopColor={colors.color} stopOpacity="0.6" />
-                  <stop offset="100%" stopColor={colors.color} stopOpacity="1" />
-                </>
-              ) : (
-                <>
-                  <stop offset="0%" stopColor={colors.lightColor} stopOpacity="0.9" />
-                  <stop offset="100%" stopColor={colors.lightEndColor} stopOpacity="1" />
-                </>
-              )}
+              <stop offset="0%" stopColor={colors.color} stopOpacity="0.72" />
+              <stop offset="100%" stopColor={colors.color} stopOpacity="1" />
             </linearGradient>
 
             <filter id={`gauge-glow-${uniqueId}`}>
@@ -190,7 +157,7 @@ export const ScoreGauge: React.FC<ScoreGaugeProps> = ({
             cy={width / 2}
             r={radius}
             fill="none"
-            stroke="rgba(255, 255, 255, 0.05)"
+            stroke="hsl(var(--border))"
             strokeWidth={stroke}
             strokeLinecap="round"
             strokeDasharray={`${arcLength} ${circumference}`}
@@ -202,7 +169,7 @@ export const ScoreGauge: React.FC<ScoreGaugeProps> = ({
             cy={width / 2}
             r={radius}
             fill="none"
-            stroke={isDark ? colors.color : colors.lightColor}
+            stroke={colors.color}
             strokeWidth={stroke + gaugeTheme.glowStrokeExtra}
             strokeLinecap="round"
             strokeDasharray={`${progress} ${circumference}`}
@@ -228,7 +195,7 @@ export const ScoreGauge: React.FC<ScoreGaugeProps> = ({
         {/* Center value */}
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span
-            className={cn('font-bold', fontSize, isDark ? 'text-white' : 'text-foreground')}
+            className={cn('font-semibold text-foreground', fontSize)}
             style={gaugeTheme.valueTextShadow ? { textShadow: gaugeTheme.valueTextShadow } : {}}
           >
             {displayScore}
@@ -236,9 +203,9 @@ export const ScoreGauge: React.FC<ScoreGaugeProps> = ({
           {showLabel && (
             <span
               className={`${labelSize} font-semibold mt-1`}
-              style={{ color: isDark ? colors.color : colors.lightEndColor }}
+              style={{ color: colors.color }}
             >
-              {label.toUpperCase()}
+              {label}
             </span>
           )}
         </div>

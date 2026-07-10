@@ -117,10 +117,15 @@ describe('HomePage', () => {
 
     const dashboard = await screen.findByTestId('home-dashboard');
     expect(dashboard).toBeInTheDocument();
-    expect(dashboard.className).toContain('h-[calc(100vh-5rem)]');
-    expect(dashboard.className).toContain('lg:h-[calc(100vh-2rem)]');
-    expect(dashboard.firstElementChild?.className).toContain('min-h-0');
-    expect(dashboard.querySelector('.flex-1.flex.min-h-0.overflow-hidden')).toBeTruthy();
+    expect(dashboard).toHaveAttribute('data-layout', 'report-workspace');
+    expect(dashboard.className).toContain('h-[calc(100vh-3.5rem)]');
+    expect(dashboard.className).toContain('lg:h-screen');
+    expect(screen.getByTestId('home-workspace-frame')).toHaveClass('max-w-[2160px]');
+    expect(screen.getByTestId('home-workspace-frame')).toHaveClass('2xl:px-6');
+    expect(screen.getByTestId('home-report-content')).toHaveClass('2xl:max-w-[1800px]');
+    expect(dashboard.querySelector('[data-slot="home-toolbar"]')).not.toBeNull();
+    expect(dashboard.querySelector('[data-slot="history-pane"]')).not.toBeNull();
+    expect(dashboard.querySelector('[data-slot="report-pane"]')).not.toBeNull();
     expect(screen.getByTestId('home-dashboard-scroll')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('输入股票代码或名称，如 600519、贵州茅台、AAPL')).toBeInTheDocument();
     expect(await screen.findByText('趋势维持强势')).toBeInTheDocument();
@@ -149,6 +154,11 @@ describe('HomePage', () => {
     expect(screen.getByRole('heading', { name: '开始分析', level: 3 })).toBeInTheDocument();
     expect(screen.getByText('输入股票代码进行分析，或从左侧选择历史报告查看。')).toBeInTheDocument();
     expect(screen.getByText('暂无历史分析记录')).toBeInTheDocument();
+    const workspace = screen.getByTestId('home-dashboard');
+    expect(workspace).toHaveAttribute('data-layout', 'report-workspace');
+    expect(workspace.querySelector('[data-slot="home-toolbar"]')).not.toBeNull();
+    expect(workspace.querySelector('[data-slot="history-pane"]')).not.toBeNull();
+    expect(workspace.querySelector('[data-slot="report-pane"]')).not.toBeNull();
   });
 
   it('surfaces duplicate task warnings from dashboard submission', async () => {
@@ -398,7 +408,7 @@ describe('HomePage', () => {
     });
   });
 
-  it('opens and closes the mobile history drawer without changing dashboard styles', async () => {
+  it('opens and closes the shared mobile history drawer', async () => {
     vi.mocked(historyApi.getList).mockResolvedValue({
       total: 0,
       page: 1,
@@ -406,7 +416,7 @@ describe('HomePage', () => {
       items: [],
     });
 
-    const { container } = render(
+    render(
       <MemoryRouter>
         <HomePage />
       </MemoryRouter>,
@@ -415,13 +425,11 @@ describe('HomePage', () => {
     const trigger = await screen.findByRole('button', { name: '历史记录' });
     fireEvent.click(trigger);
 
-    expect(container.querySelector('.page-drawer-overlay')).toBeTruthy();
-    expect(container.querySelector('.dashboard-card')).toBeTruthy();
-
-    fireEvent.click(container.querySelector('.fixed.inset-0.z-40') as HTMLElement);
+    expect(await screen.findByRole('dialog', { name: '历史分析' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '关闭抽屉' }));
 
     await waitFor(() => {
-      expect(container.querySelector('.page-drawer-overlay')).toBeFalsy();
+      expect(screen.queryByRole('dialog', { name: '历史分析' })).not.toBeInTheDocument();
     });
   });
 

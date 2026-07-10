@@ -1,16 +1,28 @@
-import React, { useState } from 'react';
-import { motion } from 'motion/react';
-import { BarChart3, BriefcaseBusiness, Compass, Home, Lightbulb, LogOut, MessageSquareQuote, Settings2 } from 'lucide-react';
+import React, { Fragment, useState } from 'react';
+import {
+  BarChart3,
+  BriefcaseBusiness,
+  Compass,
+  Home,
+  Lightbulb,
+  LogOut,
+  MessageSquareQuote,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings2,
+} from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAgentChatStore } from '../../stores/agentChatStore';
 import { cn } from '../../utils/cn';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { StatusDot } from '../common/StatusDot';
+import { Tooltip } from '../common/Tooltip';
 import { ThemeToggle } from '../theme/ThemeToggle';
 
 type SidebarNavProps = {
   collapsed?: boolean;
+  onToggleCollapsed?: () => void;
   onNavigate?: () => void;
 };
 
@@ -23,98 +35,145 @@ type NavItem = {
   badge?: 'completion';
 };
 
-const NAV_ITEMS: NavItem[] = [
-  { key: 'home', label: '首页', to: '/', icon: Home, exact: true },
-  { key: 'discover', label: '发现', to: '/discover', icon: Compass },
-  { key: 'candidates', label: '候选', to: '/candidates', icon: Lightbulb },
-  { key: 'chat', label: '问股', to: '/chat', icon: MessageSquareQuote, badge: 'completion' },
-  { key: 'portfolio', label: '持仓', to: '/portfolio', icon: BriefcaseBusiness },
-  { key: 'backtest', label: '回测', to: '/backtest', icon: BarChart3 },
-  { key: 'settings', label: '设置', to: '/settings', icon: Settings2 },
+const NAV_SECTIONS: Array<{ label: string; items: NavItem[] }> = [
+  {
+    label: '主要功能',
+    items: [
+      { key: 'home', label: '首页', to: '/', icon: Home, exact: true },
+      { key: 'discover', label: '发现', to: '/discover', icon: Compass },
+      { key: 'candidates', label: '候选', to: '/candidates', icon: Lightbulb },
+    ],
+  },
+  {
+    label: '研究工具',
+    items: [
+      { key: 'chat', label: '问股', to: '/chat', icon: MessageSquareQuote, badge: 'completion' },
+      { key: 'portfolio', label: '持仓', to: '/portfolio', icon: BriefcaseBusiness },
+      { key: 'backtest', label: '回测', to: '/backtest', icon: BarChart3 },
+    ],
+  },
+  {
+    label: '系统',
+    items: [
+      { key: 'settings', label: '设置', to: '/settings', icon: Settings2 },
+    ],
+  },
 ];
 
-export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNavigate }) => {
+export const SidebarNav: React.FC<SidebarNavProps> = ({
+  collapsed = false,
+  onToggleCollapsed,
+  onNavigate,
+}) => {
   const { authEnabled, logout } = useAuth();
   const completionBadge = useAgentChatStore((state) => state.completionBadge);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const withCollapsedHelp = (content: string, control: React.ReactNode) => (
+    collapsed ? (
+      <Tooltip content={content} side="right" className="w-full">
+        {control}
+      </Tooltip>
+    ) : control
+  );
 
   return (
-    <div className="flex h-full flex-col">
-      <div className={cn('mb-4 flex items-center gap-2 px-1', collapsed ? 'justify-center' : '')}>
-        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-gradient text-[hsl(var(--primary-foreground))] shadow-[0_12px_28px_var(--nav-brand-shadow)]">
-          <BarChart3 className="h-5 w-5" />
+    <div className="flex h-full w-full flex-col p-3">
+      <div className={cn('flex h-11 items-center gap-3 px-2', collapsed && 'justify-center px-0')}>
+        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-primary text-[10px] font-bold text-primary-foreground">
+          DSA
         </div>
         {!collapsed ? (
-          <p className="min-w-0 truncate text-sm font-semibold text-foreground">DSA</p>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-foreground">每日投研</p>
+            <p className="truncate text-xs text-muted-foreground">股票分析工作台</p>
+          </div>
         ) : null}
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1.5" aria-label="主导航">
-        {NAV_ITEMS.map(({ key, label, to, icon: Icon, exact, badge }) => (
-          <NavLink
-            key={key}
-            to={to}
-            end={exact}
-            onClick={onNavigate}
-            aria-label={label}
-            className={({ isActive }) =>
-              cn(
-                'group relative flex items-center gap-3 border-y border-x-0 text-sm transition-all',
-                'h-[var(--nav-item-height)]',
-                collapsed ? 'justify-center px-0' : 'px-[var(--nav-item-padding-x)]',
-                isActive
-                  ? 'border-[var(--nav-active-border)] bg-[var(--nav-active-bg)] text-[hsl(var(--primary))] font-medium'
-                  : 'border-transparent text-secondary-text hover:bg-[var(--nav-hover-bg)] hover:text-foreground'
-              )
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && (
-                  <motion.div 
-                    layoutId="activeIndicator"
-                    className="absolute top-0 bottom-0 left-0 w-[var(--nav-indicator-width)] bg-[var(--nav-indicator-bg)] shadow-[0_0_10px_var(--nav-indicator-shadow)]"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: 0.2 }}
-                  />
-                )}
-                <Icon className={cn('ml-1 h-5 w-5 shrink-0', isActive ? 'text-[var(--nav-icon-active)]' : 'text-current')} />
-                {!collapsed ? <span className="truncate">{label}</span> : null}
-                {badge === 'completion' && completionBadge ? (
-                  <StatusDot
-                    tone="info"
-                    data-testid="chat-completion-badge"
-                    className={cn(
-                      'absolute right-3 border-2 border-background shadow-[0_0_10px_var(--nav-indicator-shadow)]',
-                      collapsed ? 'right-2 top-2' : ''
+      <nav className="mt-4 min-h-0 flex-1 overflow-y-auto" aria-label="主导航">
+        {NAV_SECTIONS.map((section, sectionIndex) => (
+          <Fragment key={section.label}>
+            {!collapsed ? (
+              <p className={cn('px-3 pb-1 text-xs font-medium text-muted-foreground', sectionIndex > 0 && 'mt-5')}>
+                {section.label}
+              </p>
+            ) : sectionIndex > 0 ? <div className="my-3 border-t border-border" /> : null}
+
+            <div className="space-y-1">
+              {section.items.map(({ key, label, to, icon: Icon, exact, badge }) => {
+                const navLink = (
+                  <NavLink
+                    to={to}
+                    end={exact}
+                    onClick={onNavigate}
+                    aria-label={label}
+                    className={({ isActive }) => cn(
+                      'relative flex h-10 items-center gap-3 rounded-md px-3 text-sm transition-colors duration-200',
+                      collapsed && 'justify-center px-0',
+                      isActive
+                        ? 'bg-accent font-medium text-accent-foreground'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
                     )}
-                    aria-label="问股有新消息"
-                  />
-                ) : null}
-              </>
-            )}
-          </NavLink>
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {!collapsed ? <span className="truncate">{label}</span> : null}
+                    {badge === 'completion' && completionBadge ? (
+                      <StatusDot
+                        tone="info"
+                        data-testid="chat-completion-badge"
+                        className={cn('absolute right-3', collapsed && 'right-2 top-2')}
+                        aria-label="问股有新消息"
+                      />
+                    ) : null}
+                  </NavLink>
+                );
+
+                return collapsed ? (
+                  <Tooltip key={key} content={label} side="right" className="w-full">
+                    {navLink}
+                  </Tooltip>
+                ) : (
+                  <Fragment key={key}>{navLink}</Fragment>
+                );
+              })}
+            </div>
+          </Fragment>
         ))}
       </nav>
 
-      <div className="mt-4 mb-2">
+      <div className="space-y-1 border-t border-border pt-3">
         <ThemeToggle variant="nav" collapsed={collapsed} />
-      </div>
 
-      {authEnabled ? (
-        <button
-          type="button"
-          onClick={() => setShowLogoutConfirm(true)}
-          className={cn(
-            'mt-5 flex h-11 w-full cursor-pointer select-none items-center gap-3 rounded-2xl border border-transparent px-3 text-sm text-secondary-text transition-all hover:border-border/70 hover:bg-hover hover:text-foreground',
-            collapsed ? 'justify-center px-2' : ''
-          )}
-        >
-          <LogOut className="h-5 w-5 shrink-0" />
-          {!collapsed ? <span>退出</span> : null}
-        </button>
-      ) : null}
+        {authEnabled ? withCollapsedHelp('退出', (
+          <button
+            type="button"
+            aria-label="退出"
+            onClick={() => setShowLogoutConfirm(true)}
+            className={cn(
+              'flex h-10 w-full cursor-pointer items-center gap-3 rounded-md px-3 text-sm text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-accent-foreground',
+              collapsed && 'justify-center px-0',
+            )}
+          >
+            <LogOut className="h-4 w-4 shrink-0" />
+            {!collapsed ? <span>退出</span> : null}
+          </button>
+        )) : null}
+
+        {onToggleCollapsed ? withCollapsedHelp('展开侧边栏', (
+          <button
+            type="button"
+            aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'}
+            onClick={onToggleCollapsed}
+            className={cn(
+              'flex h-10 w-full cursor-pointer items-center gap-3 rounded-md px-3 text-sm text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-accent-foreground',
+              collapsed && 'justify-center px-0',
+            )}
+          >
+            {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+            {!collapsed ? <span>折叠侧边栏</span> : null}
+          </button>
+        )) : null}
+      </div>
 
       <ConfirmDialog
         isOpen={showLogoutConfirm}

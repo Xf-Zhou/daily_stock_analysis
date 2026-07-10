@@ -54,14 +54,15 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
           checked={isChecked}
           onChange={() => onToggleChecked(item.id)}
           disabled={isDeleting}
-          className="h-3.5 w-3.5 cursor-pointer rounded border-subtle-hover bg-transparent accent-primary focus:ring-primary/30 disabled:opacity-50"
+          className="h-3.5 w-3.5 cursor-pointer rounded border-input bg-background accent-foreground focus:ring-ring disabled:opacity-50"
         />
       </div>
       <button
         type="button"
+        data-slot="history-item"
         onClick={() => onClick(item.id)}
-        className={`home-history-item flex-1 text-left p-2.5 group/item ${
-          isViewing ? 'home-history-item-selected' : ''
+        className={`group/item flex-1 rounded-md border p-2.5 text-left transition-colors ${
+          isViewing ? 'border-border bg-accent' : 'border-transparent hover:bg-accent/70'
         }`}
       >
         <div className={`flex items-center gap-2.5 relative z-10${isTruncated ? ' group-hover/item:z-20' : ''}`}>
@@ -70,7 +71,6 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
               className="w-1 h-8 rounded-full flex-shrink-0"
               style={{
                 backgroundColor: sentimentColor,
-                boxShadow: `0 0 10px ${sentimentColor}40`,
               }}
             />
           )}
@@ -90,7 +90,7 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
                 <Badge
                   variant="default"
                   size="sm"
-                  className={`home-history-sentiment-badge shrink-0 shadow-none text-[11px] font-semibold leading-none transition-opacity duration-200${isTruncated ? ' group-hover/item:opacity-80' : ''}`}
+                  className={`shrink-0 shadow-none text-[11px] font-medium leading-none transition-opacity duration-200${isTruncated ? ' group-hover/item:opacity-80' : ''}`}
                   style={{
                     color: sentimentColor,
                     borderColor: `${sentimentColor}30`,
@@ -102,11 +102,11 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
               )}
             </div>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-[11px] text-secondary-text font-mono">
+              <span className="font-mono text-[11px] text-muted-foreground">
                 {item.stockCode}
               </span>
-              <span className="w-1 h-1 rounded-full bg-subtle-hover" />
-              <span className="text-[11px] text-muted-text">
+              <span className="h-1 w-1 rounded-full bg-border" />
+              <span className="text-[11px] text-muted-foreground">
                 {formatDateTime(item.createdAt)}
               </span>
             </div>
