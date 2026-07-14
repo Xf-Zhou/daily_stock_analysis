@@ -34,8 +34,9 @@ This document compiles common issues encountered by users and their solutions.
 1. Fixed in v2.3.0, Tencent interface now supports volume ratio parsing
 2. Recommended real-time quote source priority:
    ```bash
-   REALTIME_SOURCE_PRIORITY=tencent,akshare_sina,efinance,akshare_em
+   REALTIME_SOURCE_PRIORITY=public_auto,efinance,akshare_em
    ```
+   `public_auto` prefers direct Tencent quotes and automatically falls back to direct Sina and Eastmoney endpoints.
 3. System has built-in 5-day average volume calculation as fallback
 
 > Related Issue: [#155](https://github.com/Xf-Zhou/daily_stock_analysis/issues/155)

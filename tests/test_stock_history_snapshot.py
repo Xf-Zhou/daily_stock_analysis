@@ -239,6 +239,31 @@ class StockHistorySnapshotTestCase(unittest.TestCase):
         self.assertFalse(result.cache_hit)
         self.assertFalse(result.stale)
 
+    def test_nondefault_exchange_never_reads_or_writes_plain_numeric_cache_key(self) -> None:
+        from src.services.history_loader import load_history_snapshot
+
+        effective = date(2026, 3, 27)
+        db = _FakeDb({"000001": _rows("000001", effective, 30)})
+        db.get_data_range = MagicMock(wraps=db.get_data_range)
+        network_df = _df_rows("000001.SH", effective, 30)
+        manager = SimpleNamespace(
+            get_daily_data=MagicMock(return_value=(network_df, "public_tencent"))
+        )
+
+        with patch("src.storage.get_db", return_value=db), \
+             patch("src.services.history_loader._get_fetcher_manager", return_value=manager), \
+             patch("src.core.trading_calendar.get_effective_trading_date", return_value=effective):
+            result = load_history_snapshot("000001.SH", days=30)
+
+        requested_codes = [call.args[0] for call in db.get_data_range.call_args_list]
+        self.assertNotIn("000001", requested_codes)
+        self.assertIn("000001.SH", requested_codes)
+        manager.get_daily_data.assert_called_once()
+        _, write_code, source = db.save_daily_data.call_args.args
+        self.assertEqual(write_code, "000001.SH")
+        self.assertEqual(source, "public_tencent")
+        self.assertFalse(result.cache_hit)
+
     def test_stock_service_filters_nan_nat_and_invalid_ohlc(self) -> None:
         from src.services.history_loader import HistoryLoadResult
         from src.services.stock_service import StockService

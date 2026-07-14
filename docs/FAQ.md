@@ -34,8 +34,9 @@
 1. 已在 v2.3.0 修复，腾讯接口现已支持量比解析
 2. 推荐配置实时行情源优先级：
    ```bash
-   REALTIME_SOURCE_PRIORITY=tencent,akshare_sina,efinance,akshare_em
+   REALTIME_SOURCE_PRIORITY=public_auto,efinance,akshare_em
    ```
+   `public_auto` 会优先使用腾讯直连，并在失败时自动切换新浪与东方财富直连。
 3. 系统已内置 5 日均量计算作为兜底逻辑
 
 > 📌 相关 Issue: [#155](https://github.com/Xf-Zhou/daily_stock_analysis/issues/155)

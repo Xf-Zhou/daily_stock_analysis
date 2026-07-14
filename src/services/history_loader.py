@@ -64,15 +64,27 @@ def _get_fetcher_manager():
 # DB-first history loader
 # ---------------------------------------------------------------------------
 def _history_code_candidates(stock_code: str) -> Tuple[List[str], str]:
-    from data_provider.base import canonical_stock_code, normalize_stock_code
+    from data_provider.base import (
+        _exchange_aware_stock_identity,
+        _requires_exchange_aware_fetcher,
+        canonical_stock_code,
+        normalize_stock_code,
+    )
 
     raw_code = str(stock_code or "").strip()
     normalized_code = canonical_stock_code(normalize_stock_code(raw_code))
+    storage_code = _exchange_aware_stock_identity(raw_code)
     candidates: List[str] = []
-    for candidate in (canonical_stock_code(raw_code), normalized_code):
+    raw_candidate = canonical_stock_code(raw_code)
+    candidate_values = (
+        (raw_candidate, storage_code)
+        if _requires_exchange_aware_fetcher(raw_code)
+        else (raw_candidate, normalized_code)
+    )
+    for candidate in candidate_values:
         if candidate and candidate not in candidates:
             candidates.append(candidate)
-    return candidates, normalized_code
+    return candidates, storage_code
 
 
 def _normalize_history_days(days: Any) -> int:

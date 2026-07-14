@@ -33,8 +33,10 @@ class _DummyBoardFetcher:
         self.name = name
         self.priority = priority
         self._boards = boards or []
+        self.calls = []
 
     def get_belong_board(self, _stock_code: str):
+        self.calls.append(_stock_code)
         return self._boards
 
 
@@ -379,6 +381,24 @@ class TestFundamentalContext(unittest.TestCase):
         self.assertNotEqual(key_low, key_high)
         self.assertIn("budget=", key_low)
 
+    def test_fundamental_cache_and_pipeline_keep_explicit_exchange_identity(self) -> None:
+        manager = DataFetcherManager(fetchers=[])
+        cfg = SimpleNamespace(enable_fundamental_pipeline=True)
+
+        self.assertNotEqual(
+            manager._get_fundamental_cache_key("000001.SH", 1.0),
+            manager._get_fundamental_cache_key("000001.SZ", 1.0),
+        )
+        with patch("src.config.get_config", return_value=cfg), patch.object(
+            manager,
+            "get_realtime_quote",
+        ) as realtime:
+            ctx = manager.get_fundamental_context("000001.SH")
+
+        self.assertEqual(ctx["status"], "not_supported")
+        self.assertIn("explicit exchange identity", ctx["errors"][0])
+        realtime.assert_not_called()
+
     def test_board_context_empty_rankings_mark_failed(self) -> None:
         manager = DataFetcherManager(fetchers=[])
         cfg = SimpleNamespace(
@@ -428,6 +448,25 @@ class TestFundamentalContext(unittest.TestCase):
         self.assertEqual(len(boards), 2)
         self.assertEqual(boards[0]["name"], "白酒")
         self.assertEqual(boards[1]["name"], "消费")
+
+    def test_get_belong_boards_skips_sources_that_drop_explicit_exchange(self) -> None:
+        unsafe = _DummyBoardFetcher(
+            "EfinanceFetcher",
+            priority=0,
+            boards=[{"name": "错误板块"}],
+        )
+        tushare = _DummyBoardFetcher(
+            "TushareFetcher",
+            priority=1,
+            boards=[{"name": "上证板块"}],
+        )
+        manager = DataFetcherManager(fetchers=[unsafe, tushare])
+
+        boards = manager.get_belong_boards("000001.SH")
+
+        self.assertEqual(boards, [{"name": "上证板块"}])
+        self.assertEqual(unsafe.calls, [])
+        self.assertEqual(tushare.calls, ["000001.SH"])
 
     def test_get_belong_boards_preserves_cn_code_and_type_fields(self) -> None:
         fetcher = _DummyBoardFetcher(

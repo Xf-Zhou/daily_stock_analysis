@@ -299,7 +299,14 @@ For the notification baseline, diagnostics, and deployment notes, see [Notificat
 | `ENABLE_REALTIME_TECHNICAL_INDICATORS` | Intraday real-time technicals: Calculate MA5/MA10/MA20 and bull trends using real-time prices when enabled (Issue #234); uses yesterday's close if disabled. | `true` | Optional |
 | `ENABLE_CHIP_DISTRIBUTION` | Enable chip distribution analysis (this API is unstable, recommended to disable for cloud deployment). GitHub Actions users must set `ENABLE_CHIP_DISTRIBUTION=true` in Repository Variables to enable; disabled by default in workflows. | `true` | Optional |
 | `ENABLE_EASTMONEY_PATCH` | Eastmoney API patch: Recommended to set to `true` when Eastmoney APIs fail frequently (e.g., RemoteDisconnected, connection closed). Injects NID tokens and random User-Agents to reduce rate limiting probability. | `false` | Optional |
-| `REALTIME_SOURCE_PRIORITY` | Real-time quote source priority (comma-separated), e.g., `tencent,akshare_sina,efinance,akshare_em` | See .env.example | Optional |
+| `REALTIME_SOURCE_PRIORITY` | Realtime quote source priority; defaults to `public_auto,efinance,akshare_em` | See .env.example | Optional |
+| `PUBLIC_MARKET_ENABLED` | Enable the direct Tencent/Sina/Eastmoney public-market adapter | `true` | Optional |
+| `PUBLIC_MARKET_SOURCE_ORDER` | Provider order inside `public_auto` | `tencent,sina,eastmoney` | Optional |
+| `PUBLIC_MARKET_TIMEOUT_SECONDS` | Timeout for one public-market HTTP request, in seconds | `4` | Optional |
+| `PUBLIC_MARKET_OVERALL_TIMEOUT_SECONDS` | Total budget for one public-market auto operation; a targeted batch shares this budget | `8` | Optional |
+| `PUBLIC_MARKET_QUOTE_CACHE_TTL_SECONDS` | In-process short cache for public realtime quotes, in seconds | `15` | Optional |
+| `PUBLIC_MARKET_MIN_INTERVAL_SECONDS` | Minimum delay between public-market HTTP requests, in seconds | `0.05` | Optional |
+| `PUBLIC_MARKET_PRIORITY` | Daily-bar fetcher priority for the public adapter; lower values run first | `0` | Optional |
 | `ENABLE_FUNDAMENTAL_PIPELINE` | Master switch for fundamental aggregation; when disabled, returns `not_supported` block only, without altering the original analysis pipeline. | `true` | Optional |
 | `FUNDAMENTAL_STAGE_TIMEOUT_SECONDS` | Total latency budget for the fundamental stage (seconds) | `1.5` | Optional |
 | `FUNDAMENTAL_FETCH_TIMEOUT_SECONDS` | Timeout for a single capability source call (seconds) | `0.8` | Optional |
@@ -826,9 +833,20 @@ Features:
 
 ## Data Source Configuration
 
-System defaults to AkShare (free), also supports other data sources:
+The system now prefers the free public-market auto adapter and retains AkShare, Efinance, YFinance, Tushare, and Longbridge as fallbacks:
 
-### AkShare (Default)
+### Public Market Auto (Default)
+- Uses native Python requests to Tencent, Sina, and Eastmoney without requiring a token. Realtime quotes default to `tencent -> sina -> eastmoney` fallback.
+- Covers A-shares, BSE, HK, and US equities. US indices remain on YFinance to avoid public-endpoint index and adjustment inconsistencies.
+- Enforces per-request and hard overall deadlines, including response-body reads; reuses the existing provider/capability circuit breaker, keeps a 15-second quote cache, and batches only requested watchlist symbols instead of downloading an entire market.
+- Uses forward-adjusted daily bars, normalizes A-share/BSE volume to shares, and validates OHLC, dates, duplicate rows, recency, and window density. Sina only participates in quotes because its public K-line endpoint cannot provide adjusted prices; sparse or anomalous results do not block fallback to YFinance, AkShare, Efinance, or other existing fetchers.
+- `PUBLIC_MARKET_PRIORITY` participates in US-equity daily-fetcher ordering. Setting it higher than `YFINANCE_PRIORITY` makes YFinance run first; US indices remain pinned to YFinance.
+- Once a public US realtime quote contains a valid price, the 15-second cache is reused without calling YFinance solely for optional fields that public sources structurally omit, such as volume ratio, turnover, or valuation metrics. YFinance remains a fallback when public quotes fail.
+- Preserves explicit SH/SZ exchange identity. For a non-default identity such as `000001.SH`, historical bars only read and write an exchange-qualified cache key and never fall back to the plain numeric key. Name, chip, board, and fundamental providers that cannot distinguish same-digit securities are likewise skipped or reported as unsupported instead of mixing exchanges.
+- Tune the internal provider order with `PUBLIC_MARKET_SOURCE_ORDER`, or place `tencent`, `sina`, or `eastmoney` directly in `REALTIME_SOURCE_PRIORITY` for diagnostics.
+- The provider-selection approach references the MIT-licensed [zhangxiangliang/stock-api](https://github.com/zhangxiangliang/stock-api) project without adding a Node runtime or subprocess dependency.
+
+### AkShare
 - Free, no configuration needed
 - Data source: Eastmoney scraper
 - HK realtime quotes wrap `stock_hk_spot_em()` and fallback `stock_hk_spot()` with caller-side timeout protection: the app waits up to 30 seconds by default, then continues through fallback paths or degraded results for the current chat/analysis request
@@ -846,7 +864,7 @@ System defaults to AkShare (free), also supports other data sources:
 ### YFinance
 - Free, no configuration needed
 - Supports US/HK stock data
-- US stock historical and real-time data both use YFinance exclusively to avoid technical indicator errors from akshare's US stock adjustment issues
+- US equities fall back to YFinance when public-market auto cannot provide a complete daily window; US indices continue to route directly to YFinance
 
 ### Longbridge
 - Optional fallback for US/HK stocks, mainly used to supplement fields that YFinance may miss
@@ -867,7 +885,7 @@ Use `hk` prefix for HK stock codes:
 STOCK_LIST=600519,hk00700,hk01810
 ```
 
-HK daily history skips efinance, pytdx, baostock, and other built-in providers that do not support HK daily data, avoiding mismatches between HK symbols and non-HK market data. AkShare/Tushare/YFinance/Longbridge continue to provide HK fallback paths. If Longbridge is inside its connection cooldown window, the route temporarily skips it and continues with the remaining HK-capable fallbacks.
+HK daily history skips efinance, pytdx, baostock, and other built-in providers that do not support HK daily data, avoiding mismatches between HK symbols and non-HK market data. Public-market auto runs first, while AkShare/Tushare/YFinance/Longbridge continue to provide fallback paths. If Longbridge is inside its connection cooldown window, the route temporarily skips it and continues with the remaining HK-capable fallbacks.
 
 ### Multi-Model Switching
 

@@ -13,7 +13,7 @@ if "litellm" not in sys.modules:
 if "json_repair" not in sys.modules:
     sys.modules["json_repair"] = MagicMock()
 
-from data_provider.base import DataFetcherManager
+from data_provider.base import DataFetcherManager, DataFetchError
 from data_provider.realtime_types import RealtimeSource, UnifiedRealtimeQuote
 
 
@@ -37,6 +37,18 @@ def _make_quote(code: str = "AAPL") -> UnifiedRealtimeQuote:
         total_mv=1000.0,
         circ_mv=900.0,
         amplitude=2.0,
+    )
+
+
+def _make_sparse_public_quote(code: str = "AAPL") -> UnifiedRealtimeQuote:
+    return UnifiedRealtimeQuote(
+        code=code,
+        name="Apple",
+        source=RealtimeSource.TENCENT,
+        price=188.8,
+        change_pct=1.2,
+        volume=1000,
+        amount=188800.0,
     )
 
 
@@ -68,6 +80,9 @@ class TestFetcherSourceOptimization(unittest.TestCase):
         )
 
         with patch("data_provider.efinance_fetcher.EfinanceFetcher", return_value=_StubFetcher("EfinanceFetcher", 0)), patch(
+            "data_provider.public_market_fetcher.PublicMarketFetcher",
+            return_value=_StubFetcher("PublicMarketFetcher", 0),
+        ), patch(
             "data_provider.akshare_fetcher.AkshareFetcher",
             return_value=_StubFetcher("AkshareFetcher", 1),
         ), patch(
@@ -91,6 +106,7 @@ class TestFetcherSourceOptimization(unittest.TestCase):
         self.assertEqual(
             manager.available_fetchers,
             [
+                "PublicMarketFetcher",
                 "EfinanceFetcher",
                 "AkshareFetcher",
                 "PytdxFetcher",
@@ -100,6 +116,261 @@ class TestFetcherSourceOptimization(unittest.TestCase):
         )
         mock_tushare.assert_not_called()
         mock_longbridge.assert_not_called()
+
+    @patch("src.config.get_config")
+    def test_a_share_public_auto_dispatches_to_shared_fetcher(self, mock_get_config):
+        mock_get_config.return_value = SimpleNamespace(
+            enable_realtime_quote=True,
+            realtime_source_priority="public_auto,efinance,akshare_em",
+        )
+        public_market = MagicMock()
+        public_market.name = "PublicMarketFetcher"
+        public_market.priority = 0
+        public_market.get_realtime_quote.return_value = _make_quote("600519")
+
+        manager = DataFetcherManager(fetchers=[public_market])
+        quote = manager.get_realtime_quote("600519.SH")
+
+        self.assertIsNotNone(quote)
+        public_market.get_realtime_quote.assert_called_once_with("600519.SH", source="auto")
+
+    @patch("src.config.get_config")
+    def test_hk_realtime_prefers_public_auto_without_longbridge(self, mock_get_config):
+        mock_get_config.return_value = SimpleNamespace(
+            enable_realtime_quote=True,
+            realtime_source_priority="public_auto,efinance,akshare_em",
+        )
+        public_market = MagicMock()
+        public_market.name = "PublicMarketFetcher"
+        public_market.priority = 0
+        public_market.get_realtime_quote.return_value = _make_quote("HK00700")
+
+        akshare = MagicMock()
+        akshare.name = "AkshareFetcher"
+        akshare.priority = 1
+
+        manager = DataFetcherManager(fetchers=[public_market, akshare])
+        quote = manager.get_realtime_quote("00700.HK")
+
+        self.assertIsNotNone(quote)
+        public_market.get_realtime_quote.assert_called_once_with("HK00700", source="auto")
+        akshare.get_realtime_quote.assert_not_called()
+
+    @patch("src.config.get_config")
+    def test_us_daily_prefers_public_auto_and_reports_actual_provider(self, mock_get_config):
+        mock_get_config.return_value = SimpleNamespace(
+            longbridge_app_key="",
+            longbridge_app_secret="",
+            longbridge_access_token="",
+        )
+        public_market = MagicMock()
+        public_market.name = "PublicMarketFetcher"
+        public_market.priority = 0
+        public_df = _make_daily_df()
+        public_df.attrs["source"] = "public_tencent"
+        public_market.get_daily_data.return_value = public_df
+
+        yfinance = MagicMock()
+        yfinance.name = "YfinanceFetcher"
+        yfinance.priority = 4
+
+        manager = DataFetcherManager(fetchers=[public_market, yfinance])
+        df, source = manager.get_daily_data(
+            "AAPL",
+            start_date="2026-05-01",
+            end_date="2026-05-08",
+        )
+
+        self.assertFalse(df.empty)
+        self.assertEqual(source, "public_tencent")
+        public_market.get_daily_data.assert_called_once()
+        yfinance.get_daily_data.assert_not_called()
+
+    @patch("src.config.get_config")
+    def test_us_daily_respects_configured_fetcher_priority(self, mock_get_config):
+        mock_get_config.return_value = SimpleNamespace(
+            longbridge_app_key="",
+            longbridge_app_secret="",
+            longbridge_access_token="",
+        )
+        public_market = MagicMock()
+        public_market.name = "PublicMarketFetcher"
+        public_market.priority = 9
+        public_market.get_daily_data.return_value = _make_daily_df()
+
+        yfinance = MagicMock()
+        yfinance.name = "YfinanceFetcher"
+        yfinance.priority = 4
+        yfinance.get_daily_data.return_value = _make_daily_df()
+
+        manager = DataFetcherManager(fetchers=[public_market, yfinance])
+        df, source = manager.get_daily_data(
+            "AAPL",
+            start_date="2026-05-01",
+            end_date="2026-05-08",
+        )
+
+        self.assertFalse(df.empty)
+        self.assertEqual(source, "YfinanceFetcher")
+        yfinance.get_daily_data.assert_called_once()
+        public_market.get_daily_data.assert_not_called()
+
+    @patch("src.config.get_config")
+    def test_us_sparse_public_quote_does_not_force_yfinance_supplement(self, mock_get_config):
+        mock_get_config.return_value = SimpleNamespace(
+            enable_realtime_quote=True,
+            realtime_source_priority="public_auto,efinance,akshare_em",
+        )
+        public_market = MagicMock()
+        public_market.name = "PublicMarketFetcher"
+        public_market.priority = 0
+        public_market.get_realtime_quote.return_value = _make_sparse_public_quote()
+
+        yfinance = MagicMock()
+        yfinance.name = "YfinanceFetcher"
+        yfinance.priority = 4
+        yfinance.get_realtime_quote.return_value = _make_quote()
+
+        manager = DataFetcherManager(fetchers=[public_market, yfinance])
+        quote = manager.get_realtime_quote("AAPL")
+
+        self.assertIsNotNone(quote)
+        self.assertEqual(quote.source, RealtimeSource.TENCENT)
+        public_market.get_realtime_quote.assert_called_once_with("AAPL", source="auto")
+        yfinance.get_realtime_quote.assert_not_called()
+
+    @patch("src.config.get_config")
+    def test_cn_daily_keeps_explicit_exchange_hint_for_public_fetcher(self, mock_get_config):
+        mock_get_config.return_value = SimpleNamespace()
+        public_market = MagicMock()
+        public_market.name = "PublicMarketFetcher"
+        public_market.priority = 0
+        public_market.get_daily_data.return_value = _make_daily_df()
+
+        manager = DataFetcherManager(fetchers=[public_market])
+        manager.get_daily_data(
+            "000001.SH",
+            start_date="2026-05-01",
+            end_date="2026-05-08",
+        )
+
+        public_market.get_daily_data.assert_called_once_with(
+            stock_code="000001.SH",
+            start_date="2026-05-01",
+            end_date="2026-05-08",
+            days=30,
+        )
+
+    @patch("src.config.get_config")
+    def test_nondefault_sh_daily_fallback_never_fetches_same_digits_from_sz(self, mock_get_config):
+        mock_get_config.return_value = SimpleNamespace()
+        public_market = MagicMock()
+        public_market.name = "PublicMarketFetcher"
+        public_market.priority = 0
+        public_market.get_daily_data.side_effect = DataFetchError("public unavailable")
+
+        efinance = MagicMock()
+        efinance.name = "EfinanceFetcher"
+        efinance.priority = 1
+        efinance.get_daily_data.return_value = _make_daily_df()
+
+        tushare = MagicMock()
+        tushare.name = "TushareFetcher"
+        tushare.priority = 2
+        tushare.get_daily_data.return_value = _make_daily_df()
+
+        manager = DataFetcherManager(fetchers=[public_market, efinance, tushare])
+        df, source = manager.get_daily_data(
+            "000001.SH",
+            start_date="2026-05-01",
+            end_date="2026-05-08",
+        )
+
+        self.assertFalse(df.empty)
+        self.assertEqual(source, "TushareFetcher")
+        public_market.get_daily_data.assert_called_once_with(
+            stock_code="000001.SH",
+            start_date="2026-05-01",
+            end_date="2026-05-08",
+            days=30,
+        )
+        tushare.get_daily_data.assert_called_once_with(
+            stock_code="000001.SH",
+            start_date="2026-05-01",
+            end_date="2026-05-08",
+            days=30,
+        )
+        efinance.get_daily_data.assert_not_called()
+
+    @patch("src.config.get_config")
+    def test_same_digits_realtime_fallback_respects_sh_vs_sz_identity(self, mock_get_config):
+        mock_get_config.return_value = SimpleNamespace(
+            enable_realtime_quote=True,
+            realtime_source_priority="public_auto,efinance,tushare",
+        )
+        public_market = MagicMock()
+        public_market.name = "PublicMarketFetcher"
+        public_market.priority = 0
+        public_market.get_realtime_quote.return_value = None
+
+        efinance = MagicMock()
+        efinance.name = "EfinanceFetcher"
+        efinance.priority = 1
+        efinance.get_realtime_quote.return_value = _make_quote("000001")
+
+        tushare = MagicMock()
+        tushare.name = "TushareFetcher"
+        tushare.priority = 2
+        tushare.get_realtime_quote.return_value = _make_quote("000001")
+
+        manager = DataFetcherManager(fetchers=[public_market, efinance, tushare])
+
+        sh_quote = manager.get_realtime_quote("000001.SH")
+
+        self.assertIsNotNone(sh_quote)
+        public_market.get_realtime_quote.assert_called_once_with("000001.SH", source="auto")
+        efinance.get_realtime_quote.assert_not_called()
+        tushare.get_realtime_quote.assert_called_once_with("000001.SH")
+
+        public_market.reset_mock()
+        efinance.reset_mock()
+        tushare.reset_mock()
+        public_market.get_realtime_quote.return_value = None
+        efinance.get_realtime_quote.return_value = _make_quote("000001")
+        tushare.get_realtime_quote.return_value = _make_quote("000001")
+
+        sz_quote = manager.get_realtime_quote("000001.SZ")
+
+        self.assertIsNotNone(sz_quote)
+        public_market.get_realtime_quote.assert_called_once_with("000001.SZ", source="auto")
+        efinance.get_realtime_quote.assert_called_once_with("000001")
+        tushare.get_realtime_quote.assert_not_called()
+
+    @patch("src.config.get_config")
+    def test_watchlist_prefetch_uses_targeted_public_batch(self, mock_get_config):
+        mock_get_config.return_value = SimpleNamespace(
+            enable_realtime_quote=True,
+            prefetch_realtime_quotes=True,
+            realtime_source_priority="public_auto,efinance,akshare_em",
+        )
+        public_market = MagicMock()
+        public_market.name = "PublicMarketFetcher"
+        public_market.priority = 0
+        public_market.get_realtime_quotes.return_value = [
+            _make_quote(code)
+            for code in ("600519", "000001", "HK00700", "AAPL", "TSLA")
+        ]
+
+        manager = DataFetcherManager(fetchers=[public_market])
+        count = manager.prefetch_realtime_quotes(
+            ["600519.SH", "000001.SZ", "00700.HK", "AAPL", "TSLA"]
+        )
+
+        self.assertEqual(count, 5)
+        public_market.get_realtime_quotes.assert_called_once_with(
+            ["600519.SH", "000001.SZ", "00700.HK", "AAPL", "TSLA"],
+            source="auto",
+        )
 
     @patch("src.config.get_config")
     def test_us_realtime_route_skips_temporarily_unavailable_longbridge(self, mock_get_config):
@@ -180,6 +451,24 @@ class TestFetcherSourceOptimization(unittest.TestCase):
         self.assertEqual(source, "AkshareFetcher")
         akshare.get_daily_data.assert_called_once()
         longbridge.get_daily_data.assert_not_called()
+
+    @patch("src.config.get_config")
+    def test_chip_distribution_keeps_nondefault_exchange_identity(self, mock_get_config):
+        mock_get_config.return_value = SimpleNamespace(enable_chip_distribution=True)
+        unsafe = MagicMock()
+        unsafe.name = "EfinanceFetcher"
+        unsafe.priority = 0
+        tushare = MagicMock()
+        tushare.name = "TushareFetcher"
+        tushare.priority = 1
+        tushare.get_chip_distribution.return_value = {"winner": "sh"}
+
+        manager = DataFetcherManager(fetchers=[unsafe, tushare])
+        chip = manager.get_chip_distribution("000001.SH")
+
+        self.assertEqual(chip, {"winner": "sh"})
+        unsafe.get_chip_distribution.assert_not_called()
+        tushare.get_chip_distribution.assert_called_once_with("000001.SH")
 
 
 if __name__ == "__main__":

@@ -184,6 +184,50 @@ def is_bse_code(code: str) -> bool:
 
     return c.startswith(("92", "43", "81", "82", "83", "87", "88"))
 
+
+def _explicit_mainland_exchange(stock_code: str) -> Optional[str]:
+    """Return an explicit SH/SZ hint without guessing from the numeric code."""
+    raw = (stock_code or "").strip().upper()
+    if raw.startswith(("SH", "SZ")) and not raw.startswith(("SH.", "SZ.")):
+        digits = raw[2:]
+        if digits.isdigit() and len(digits) in (5, 6):
+            return raw[:2].lower()
+    if "." in raw:
+        digits, suffix = raw.rsplit(".", 1)
+        if digits.isdigit() and suffix in {"SH", "SS", "SZ"}:
+            return "sh" if suffix in {"SH", "SS"} else "sz"
+    return None
+
+
+def _requires_exchange_aware_fetcher(stock_code: str) -> bool:
+    """Whether stripping an explicit exchange could identify another security."""
+    exchange = _explicit_mainland_exchange(stock_code)
+    if exchange is None:
+        return False
+    normalized = normalize_stock_code(stock_code)
+    if not normalized.isdigit() or len(normalized) != 6 or is_bse_code(normalized):
+        return False
+    inferred = "sh" if normalized.startswith(("5", "6", "9")) else "sz"
+    return exchange != inferred
+
+
+def _exchange_aware_stock_identity(stock_code: str) -> str:
+    """Keep a suffix only when dropping it could identify another security."""
+    raw = canonical_stock_code(stock_code)
+    normalized = normalize_stock_code(raw)
+    exchange = _explicit_mainland_exchange(raw)
+    if _requires_exchange_aware_fetcher(raw) and exchange:
+        return f"{normalized}.{'SH' if exchange == 'sh' else 'SZ'}"
+    return canonical_stock_code(normalized)
+
+
+def _stock_code_for_identity_sensitive_lookup(stock_code: str) -> str:
+    """Preserve only exchange hints whose removal could identify another security."""
+    if _requires_exchange_aware_fetcher(stock_code):
+        return _exchange_aware_stock_identity(stock_code)
+    return normalize_stock_code(stock_code)
+
+
 def is_st_stock(name: str) -> bool:
     """
     Check if the stock is an ST or *ST stock based on its name.
@@ -192,6 +236,7 @@ def is_st_stock(name: str) -> bool:
     """
     n = (name or "").upper()
     return 'ST' in n
+
 
 def is_kc_cy_stock(code: str) -> bool:
     """
@@ -484,6 +529,7 @@ class DataFetcherManager:
     """
 
     _DAILY_MARKET_FETCHER_SUPPORT = {
+        "PublicMarketFetcher": {"cn", "hk", "us"},
         "EfinanceFetcher": {"cn"},
         "AkshareFetcher": {"cn", "hk"},
         "TushareFetcher": {"cn", "hk"},
@@ -492,6 +538,7 @@ class DataFetcherManager:
         "YfinanceFetcher": {"cn", "hk", "us"},
         "LongbridgeFetcher": {"hk", "us"},
     }
+    _EXCHANGE_AWARE_FETCHERS = frozenset({"PublicMarketFetcher", "TushareFetcher"})
     
     def __init__(self, fetchers: Optional[List[BaseFetcher]] = None):
         """
@@ -602,8 +649,48 @@ class DataFetcherManager:
     def _call_fetcher_method(self, fetcher: BaseFetcher, method_name: str, *args, **kwargs):
         """Serialize shared fetcher state access through manager-owned per-instance locks."""
         method = getattr(fetcher, method_name)
+        if getattr(type(fetcher), "concurrent_safe", False) is True:
+            return method(*args, **kwargs)
         with self._get_fetcher_call_lock(fetcher):
             return method(*args, **kwargs)
+
+    @classmethod
+    def _stock_code_for_fetcher(
+        cls,
+        fetcher: BaseFetcher,
+        raw_stock_code: str,
+        normalized_stock_code: str,
+    ) -> str:
+        if fetcher.name in cls._EXCHANGE_AWARE_FETCHERS and raw_stock_code:
+            return raw_stock_code
+        return normalized_stock_code
+
+    @classmethod
+    def _filter_fetchers_for_exchange_identity(
+        cls,
+        fetchers: List[BaseFetcher],
+        raw_stock_code: str,
+    ) -> List[BaseFetcher]:
+        """Skip fallbacks that could reinterpret an explicit exchange as another symbol."""
+        if not _requires_exchange_aware_fetcher(raw_stock_code):
+            return fetchers
+        kept = [
+            fetcher
+            for fetcher in fetchers
+            if fetcher.name in cls._EXCHANGE_AWARE_FETCHERS
+        ]
+        skipped = [
+            fetcher.name
+            for fetcher in fetchers
+            if fetcher.name not in cls._EXCHANGE_AWARE_FETCHERS
+        ]
+        if skipped:
+            logger.warning(
+                "[数据源路由] %s 含非默认交易所，跳过无法保留交易所身份的数据源: %s",
+                raw_stock_code,
+                ", ".join(skipped),
+            )
+        return kept
 
     @classmethod
     def _filter_daily_fetchers_for_market(
@@ -659,15 +746,17 @@ class DataFetcherManager:
 
     def _get_cached_stock_name(self, stock_code: str) -> Optional[str]:
         self._ensure_concurrency_guards()
+        cache_key = _exchange_aware_stock_identity(stock_code)
         with self._stock_name_cache_lock:
-            return self._stock_name_cache.get(stock_code)
+            return self._stock_name_cache.get(cache_key)
 
     def _cache_stock_name(self, stock_code: str, name: Optional[str]) -> Optional[str]:
         if name is None:
             return None
         self._ensure_concurrency_guards()
+        cache_key = _exchange_aware_stock_identity(stock_code)
         with self._stock_name_cache_lock:
-            self._stock_name_cache[stock_code] = name
+            self._stock_name_cache[cache_key] = name
         return name
 
     def _get_tickflow_fetcher(self):
@@ -718,6 +807,7 @@ class DataFetcherManager:
 
     def close(self) -> None:
         """Best-effort release of manager-owned resources."""
+        fetchers = self._get_fetchers_snapshot()
         if not hasattr(self, "_tickflow_lock") or self._tickflow_lock is None:
             self._tickflow_lock = RLock()
 
@@ -726,11 +816,26 @@ class DataFetcherManager:
             self._tickflow_fetcher = None
             self._tickflow_api_key = None
 
+        closed_ids = set()
         if current_fetcher is not None and hasattr(current_fetcher, "close"):
             try:
                 current_fetcher.close()
+                closed_ids.add(id(current_fetcher))
             except Exception as exc:
                 logger.debug("[TickFlowFetcher] 关闭管理器资源失败: %s", exc)
+
+        for fetcher in fetchers:
+            if id(fetcher) in closed_ids:
+                continue
+            # Avoid treating MagicMock's dynamic attributes as owned resources.
+            close_method = getattr(type(fetcher), "close", None)
+            if not callable(close_method):
+                continue
+            try:
+                fetcher.close()
+                closed_ids.add(id(fetcher))
+            except Exception as exc:
+                logger.debug("[%s] 关闭管理器资源失败: %s", fetcher.name, exc)
 
     def __del__(self) -> None:
         try:
@@ -741,7 +846,7 @@ class DataFetcherManager:
 
     def _get_fundamental_cache_key(self, stock_code: str, budget_seconds: Optional[float] = None) -> str:
         """生成基本面缓存 key（包含预算分桶以避免低预算结果污染高预算请求）。"""
-        normalized_code = normalize_stock_code(stock_code)
+        normalized_code = _exchange_aware_stock_identity(stock_code)
         if budget_seconds is None:
             return f"{normalized_code}|budget=default"
         try:
@@ -961,11 +1066,12 @@ class DataFetcherManager:
         - 如果配置了 Longbridge 凭据：实例化 LongbridgeFetcher 作为美股/港股兜底
         - 未配置的可选数据源不实例化，避免在批量拉取时反复探测无效源
         - 默认优先级：
-          0. EfinanceFetcher (Priority 0) - 最高优先级
-          1. AkshareFetcher (Priority 1)
-          2. PytdxFetcher (Priority 2) - 通达信
-          3. BaostockFetcher (Priority 3)
-          4. YfinanceFetcher (Priority 4)
+          0. PublicMarketFetcher (Priority 0) - 腾讯/新浪/东方财富直连自动降级
+          1. EfinanceFetcher (Priority 0)
+          2. AkshareFetcher (Priority 1)
+          3. PytdxFetcher (Priority 2) - 通达信
+          4. BaostockFetcher (Priority 3)
+          5. YfinanceFetcher (Priority 4)
         """
         from src.config import get_config
         from .efinance_fetcher import EfinanceFetcher
@@ -975,8 +1081,10 @@ class DataFetcherManager:
         from .baostock_fetcher import BaostockFetcher
         from .yfinance_fetcher import YfinanceFetcher
         from .longbridge_fetcher import LongbridgeFetcher
+        from .public_market_fetcher import PublicMarketFetcher
         config = get_config()
         # 创建所有数据源实例（优先级在各 Fetcher 的 __init__ 中确定）
+        public_market = PublicMarketFetcher()
         efinance = EfinanceFetcher()
         akshare = AkshareFetcher()
         pytdx = PytdxFetcher()      # 通达信数据源（可配 PYTDX_HOST/PYTDX_PORT）
@@ -1004,6 +1112,7 @@ class DataFetcherManager:
         self._ensure_concurrency_guards()
         with self._fetchers_lock:
             self._fetchers = [
+                public_market,
                 efinance,
                 akshare,
                 pytdx,
@@ -1039,7 +1148,7 @@ class DataFetcherManager:
         获取日线数据（自动切换数据源）
         
         故障切换策略：
-        1. 美股指数/美股股票直接路由到 YfinanceFetcher
+        1. 美股指数直接路由到 YfinanceFetcher；美股股票优先使用公开行情 auto
         2. 其他代码从最高优先级数据源开始尝试
         3. 捕获异常后自动切换到下一个
         4. 记录每个数据源的失败原因
@@ -1059,6 +1168,7 @@ class DataFetcherManager:
         """
         from .us_index_mapping import is_us_index_code, is_us_stock_code
 
+        raw_stock_code = (stock_code or "").strip()
         # Normalize code (strip SH/SZ prefix etc.)
         stock_code = normalize_stock_code(stock_code)
 
@@ -1067,8 +1177,8 @@ class DataFetcherManager:
         request_start = time.time()
 
         # 快速路径：美股使用专用数据源路由；港股先过滤不支持港股日线的数据源
-        #   - 配置长桥凭据后: Longbridge 为首选, YFinance/AkShare 兜底
-        #   - 未配置长桥:     YFinance 为首选（美股）, 通用 fetcher 循环（港股）
+        #   - 配置长桥凭据后: Longbridge 为首选, 其余来源按 priority 兜底
+        #   - 未配置长桥:     美股来源按 priority 排序, 港股走通用 fetcher 循环
         #   - 美股指数:       始终 YFinance 为首选（Longbridge 不提供指数K线）
         is_us_index = is_us_index_code(stock_code)
         is_us = is_us_index or is_us_stock_code(stock_code)
@@ -1076,6 +1186,7 @@ class DataFetcherManager:
         if is_hk:
             fetchers = self._filter_daily_fetchers_for_market(fetchers, "hk")
         fetchers = self._filter_fetchers_by_capability(fetchers, capability="daily_data")
+        fetchers = self._filter_fetchers_for_exchange_identity(fetchers, raw_stock_code)
         total_fetchers = len(fetchers)
 
         if total_fetchers == 0:
@@ -1084,14 +1195,25 @@ class DataFetcherManager:
             logger.error(f"[数据源终止] {stock_code} 获取失败: {error_summary}")
             raise DataFetchError(error_summary)
 
-        # 美股（含美股指数）使用 Longbridge/YFinance 特殊路由；港股走下方通用数据源循环
+        # 美股（含美股指数）使用专用路由；港股走下方通用数据源循环
         if is_us:
             prefer_lb = self._longbridge_preferred(capability="daily_data") and not is_us_index
-            source_order = (
-                ["LongbridgeFetcher", "YfinanceFetcher"]
-                if prefer_lb
-                else ["YfinanceFetcher", "LongbridgeFetcher"]
-            )
+            if is_us_index:
+                source_order = ["YfinanceFetcher"]
+            else:
+                us_source_names = {
+                    "LongbridgeFetcher",
+                    "PublicMarketFetcher",
+                    "YfinanceFetcher",
+                }
+                source_order = [
+                    fetcher.name
+                    for fetcher in fetchers
+                    if fetcher.name in us_source_names
+                ]
+                if prefer_lb and "LongbridgeFetcher" in source_order:
+                    source_order.remove("LongbridgeFetcher")
+                    source_order.insert(0, "LongbridgeFetcher")
             market_label = "美股指数" if is_us_index else "美股"
 
             for src_name in source_order:
@@ -1107,18 +1229,23 @@ class DataFetcherManager:
                         df = self._call_fetcher_method(
                             fetcher,
                             "get_daily_data",
-                            stock_code=stock_code,
+                            stock_code=self._stock_code_for_fetcher(
+                                fetcher,
+                                raw_stock_code,
+                                stock_code,
+                            ),
                             start_date=start_date,
                             end_date=end_date,
                             days=days,
                         )
                         if df is not None and not df.empty:
+                            source_name = str(df.attrs.get("source") or fetcher.name)
                             elapsed = time.time() - request_start
                             logger.info(
-                                f"[数据源完成] {stock_code} 使用 [{fetcher.name}] 获取成功: "
+                                f"[数据源完成] {stock_code} 使用 [{source_name}] 获取成功: "
                                 f"rows={len(df)}, elapsed={elapsed:.2f}s"
                             )
-                            return df, fetcher.name
+                            return df, source_name
                     except Exception as e:
                         error_type, error_reason = summarize_exception(e)
                         error_msg = f"[{fetcher.name}] ({error_type}) {error_reason}"
@@ -1140,19 +1267,24 @@ class DataFetcherManager:
                 df = self._call_fetcher_method(
                     fetcher,
                     "get_daily_data",
-                    stock_code=stock_code,
+                    stock_code=self._stock_code_for_fetcher(
+                        fetcher,
+                        raw_stock_code,
+                        stock_code,
+                    ),
                     start_date=start_date,
                     end_date=end_date,
                     days=days
                 )
                 
                 if df is not None and not df.empty:
+                    source_name = str(df.attrs.get("source") or fetcher.name)
                     elapsed = time.time() - request_start
                     logger.info(
-                        f"[数据源完成] {stock_code} 使用 [{fetcher.name}] 获取成功: "
+                        f"[数据源完成] {stock_code} 使用 [{source_name}] 获取成功: "
                         f"rows={len(df)}, elapsed={elapsed:.2f}s"
                     )
-                    return df, fetcher.name
+                    return df, source_name
                     
             except Exception as e:
                 error_type, error_reason = summarize_exception(e)
@@ -1184,12 +1316,12 @@ class DataFetcherManager:
         批量预取实时行情数据（在分析开始前调用）
         
         策略：
-        1. 检查优先级中是否包含全量拉取数据源（efinance/akshare_em）
-        2. 如果不包含，跳过预取（新浪/腾讯是单股票查询，无需预取）
-        3. 如果自选股数量 >= 5 且使用全量数据源，则预取填充缓存
+        1. public_auto/腾讯/新浪优先时，对自选池做目标化批量请求并写入短缓存
+        2. efinance/akshare_em 优先时，保留原有全市场缓存预热
+        3. 股票数量较少时继续按需逐只获取
         
         这样做的好处：
-        - 使用新浪/腾讯时：每只股票独立查询，无全量拉取问题
+        - 使用公开行情 auto 时：腾讯/新浪支持一批 symbols 请求，不拉取全市场
         - 使用 efinance/东财时：预取一次，后续缓存命中
         
         Args:
@@ -1198,8 +1330,10 @@ class DataFetcherManager:
         Returns:
             预取的股票数量（0 表示跳过预取）
         """
-        # Normalize all codes
-        stock_codes = [normalize_stock_code(c) for c in stock_codes]
+        raw_stock_codes = [str(code or "").strip() for code in stock_codes]
+        raw_stock_codes = [code for code in raw_stock_codes if code]
+        # Full-market fetchers still use the repository's normalized storage form.
+        stock_codes = [normalize_stock_code(code) for code in raw_stock_codes]
 
         from src.config import get_config
 
@@ -1215,29 +1349,63 @@ class DataFetcherManager:
             logger.debug("[预取] 实时行情功能已禁用，跳过预取")
             return 0
         
-        # 检查优先级中是否包含全量拉取数据源
-        # 注意：新增全量接口（如 tushare_realtime）时需同步更新此列表
-        # 全量接口特征：一次 API 调用拉取全市场 5000+ 股票数据
         priority = config.realtime_source_priority.lower()
-        bulk_sources = ['efinance', 'akshare_em', 'tushare']  # 全量接口列表
-        
-        # 如果优先级中前两个都不是全量数据源，跳过预取
-        # 因为新浪/腾讯是单股票查询，不需要预取
-        priority_list = [s.strip() for s in priority.split(',')]
-        first_bulk_source_index = None
-        for i, source in enumerate(priority_list):
-            if source in bulk_sources:
-                first_bulk_source_index = i
-                break
-        
-        # 如果没有全量数据源，或者全量数据源排在第 3 位之后，跳过预取
-        if first_bulk_source_index is None or first_bulk_source_index >= 2:
-            logger.info(f"[预取] 当前优先级使用轻量级数据源(sina/tencent)，无需预取")
-            return 0
-        
+        priority_list = [s.strip() for s in priority.split(',') if s.strip()]
+        bulk_sources = ['efinance', 'akshare_em', 'tushare']
+        first_bulk_source_index = next(
+            (index for index, source in enumerate(priority_list) if source in bulk_sources),
+            None,
+        )
+
         # 如果股票数量少于 5 个，不进行批量预取（逐个查询更高效）
         if len(stock_codes) < 5:
             logger.info(f"[预取] 股票数量 {len(stock_codes)} < 5，跳过批量预取")
+            return 0
+
+        public_sources = {
+            "public_auto": "auto",
+            "auto": "auto",
+            "tencent": "tencent",
+            "sina": "sina",
+            "eastmoney": "eastmoney",
+        }
+        for index, source in enumerate(priority_list):
+            if source not in public_sources:
+                continue
+            if index >= 2 or (
+                first_bulk_source_index is not None and first_bulk_source_index < index
+            ):
+                break
+            fetcher = self._get_fetcher_by_name(
+                "PublicMarketFetcher",
+                capability="realtime_quote",
+            )
+            if fetcher is None or not hasattr(fetcher, "get_realtime_quotes"):
+                break
+            try:
+                quotes = self._call_fetcher_method(
+                    fetcher,
+                    "get_realtime_quotes",
+                    raw_stock_codes,
+                    source=public_sources[source],
+                )
+                if quotes:
+                    logger.info(
+                        "[预取] 公开行情目标化预取完成: %s/%s",
+                        len(quotes),
+                        len(stock_codes),
+                    )
+                    return len(quotes)
+            except Exception as exc:
+                logger.info("[预取] 公开行情目标化预取失败，继续检查全量源: %s", exc)
+            break
+
+        # 检查优先级中是否包含全量拉取数据源
+        # 注意：新增全量接口（如 tushare_realtime）时需同步更新此列表
+        # 全量接口特征：一次 API 调用拉取全市场 5000+ 股票数据
+        # 如果没有全量数据源，或者全量数据源排在第 3 位之后，跳过预取
+        if first_bulk_source_index is None or first_bulk_source_index >= 2:
+            logger.info("[预取] 当前优先级无需全市场预取")
             return 0
         
         logger.info(f"[预取] 开始批量预取实时行情，共 {len(stock_codes)} 只股票...")
@@ -1250,10 +1418,10 @@ class DataFetcherManager:
             quote = self.get_realtime_quote(first_code)
             
             if quote:
-                logger.info(f"[预取] 批量预取完成，缓存已填充")
+                logger.info("[预取] 批量预取完成，缓存已填充")
                 return len(stock_codes)
             else:
-                logger.warning(f"[预取] 批量预取失败，将使用逐个查询模式")
+                logger.warning("[预取] 批量预取失败，将使用逐个查询模式")
                 return 0
                 
         except Exception as e:
@@ -1265,12 +1433,10 @@ class DataFetcherManager:
         获取实时行情数据（自动故障切换）
         
         故障切换策略（按配置的优先级）：
-        1. 美股：使用 YfinanceFetcher.get_realtime_quote()
-        2. EfinanceFetcher.get_realtime_quote()
-        3. AkshareFetcher.get_realtime_quote(source="em")  - 东财
-        4. AkshareFetcher.get_realtime_quote(source="sina") - 新浪
-        5. AkshareFetcher.get_realtime_quote(source="tencent") - 腾讯
-        6. 返回 None（降级兜底）
+        1. public_auto：腾讯 -> 新浪 -> 东方财富直连，带缓存、超时和熔断
+        2. 美股/港股按 Longbridge、公网 auto、YFinance/AkShare 专用路由
+        3. A 股继续按配置尝试 efinance、AkShare、Tushare 等兜底
+        4. 所有来源失败时返回 None
         
         Args:
             stock_code: 股票代码
@@ -1296,10 +1462,10 @@ class DataFetcherManager:
             return None
 
         # ----------------------------------------------------------
-        # 美股 (指数 + 个股) / 港股 — 专用双源路由
-        #   配置长桥后: Longbridge 首选, YFinance/AkShare 补充
-        #   未配置长桥: YFinance/AkShare 首选, Longbridge 补充
-        #   美股指数:   始终 YFinance 首选（Longbridge 不提供指数行情）
+        # 美股 (指数 + 个股) / 港股 — 专用多源路由
+        #   配置长桥后: Longbridge 首选, 公开行情 auto 与原有来源兜底
+        #   未配置长桥: 公开行情 auto 首选, YFinance/AkShare 与 Longbridge 兜底
+        #   美股指数:   始终 YFinance（公开行情与 Longbridge 不提供完整指数行情）
         # ----------------------------------------------------------
         is_us_index = is_us_index_code(stock_code)
         is_us = is_us_index or _is_us_code(stock_code)
@@ -1307,24 +1473,45 @@ class DataFetcherManager:
 
         if is_us or is_hk:
             prefer_lb = self._longbridge_preferred() and not is_us_index
-            if is_us:
-                primary_src = "LongbridgeFetcher" if prefer_lb else "YfinanceFetcher"
-                secondary_src = "YfinanceFetcher" if prefer_lb else "LongbridgeFetcher"
-                market_label = "美股指数" if is_us_index else "美股"
-                primary_kw: dict = {}
-                secondary_kw: dict = {}
+            if is_us_index:
+                market_label = "美股指数"
+                route = [("YfinanceFetcher", {})]
+            elif is_us:
+                market_label = "美股"
+                route = (
+                    [
+                        ("LongbridgeFetcher", {}),
+                        ("PublicMarketFetcher", {"source": "auto"}),
+                        ("YfinanceFetcher", {}),
+                    ]
+                    if prefer_lb
+                    else [
+                        ("PublicMarketFetcher", {"source": "auto"}),
+                        ("YfinanceFetcher", {}),
+                        ("LongbridgeFetcher", {}),
+                    ]
+                )
             else:
-                primary_src = "LongbridgeFetcher" if prefer_lb else "AkshareFetcher"
-                secondary_src = "AkshareFetcher" if prefer_lb else "LongbridgeFetcher"
                 market_label = "港股"
-                primary_kw = {"source": "hk"} if primary_src == "AkshareFetcher" else {}
-                secondary_kw = {"source": "hk"} if secondary_src == "AkshareFetcher" else {}
+                route = (
+                    [
+                        ("LongbridgeFetcher", {}),
+                        ("PublicMarketFetcher", {"source": "auto"}),
+                        ("AkshareFetcher", {"source": "hk"}),
+                    ]
+                    if prefer_lb
+                    else [
+                        ("PublicMarketFetcher", {"source": "auto"}),
+                        ("AkshareFetcher", {"source": "hk"}),
+                        ("LongbridgeFetcher", {}),
+                    ]
+                )
 
-            primary_quote = self._try_fetcher_quote(stock_code, primary_src, **primary_kw)
-            if primary_quote is not None:
-                logger.info(f"[实时行情] {market_label} {stock_code} 成功获取 (来源: {primary_src})")
-            primary_quote = self._supplement_quote(
-                stock_code, primary_quote, secondary_src, **secondary_kw,
+            primary_quote = self._route_realtime_quote(
+                stock_code,
+                market_label,
+                route,
+                accept_sparse_public=is_us and not is_us_index,
             )
             if primary_quote is not None:
                 return primary_quote
@@ -1336,12 +1523,28 @@ class DataFetcherManager:
         source_priority = config.realtime_source_priority.split(',')
         
         errors = []
+        requires_exchange_aware = _requires_exchange_aware_fetcher(raw_stock_code)
         # primary_quote holds the first successful result; we may supplement
         # missing fields (volume_ratio, turnover_rate, etc.) from later sources.
         primary_quote = None
         
         for source in source_priority:
             source = source.strip().lower()
+            exchange_aware_source = source in {
+                "public_auto",
+                "auto",
+                "tencent",
+                "sina",
+                "eastmoney",
+                "tushare",
+            }
+            if requires_exchange_aware and not exchange_aware_source:
+                logger.warning(
+                    "[实时行情] %s 含非默认交易所，跳过无法保留交易所身份的数据源 %s",
+                    raw_stock_code,
+                    source,
+                )
+                continue
             
             try:
                 quote = None
@@ -1361,7 +1564,21 @@ class DataFetcherManager:
                     if fetcher is not None and hasattr(fetcher, 'get_realtime_quote'):
                         quote = self._call_fetcher_method(fetcher, 'get_realtime_quote', stock_code, source="sina")
                 
-                elif source in ("tencent", "akshare_qq"):
+                elif source in ("public_auto", "auto", "tencent", "sina", "eastmoney"):
+                    fetcher = self._get_fetcher_by_name(
+                        "PublicMarketFetcher",
+                        capability="realtime_quote",
+                    )
+                    if fetcher is not None and hasattr(fetcher, 'get_realtime_quote'):
+                        public_source = "auto" if source in ("public_auto", "auto") else source
+                        quote = self._call_fetcher_method(
+                            fetcher,
+                            'get_realtime_quote',
+                            raw_stock_code or stock_code,
+                            source=public_source,
+                        )
+
+                elif source == "akshare_qq":
                     fetcher = self._get_fetcher_by_name("AkshareFetcher", capability="realtime_quote")
                     if fetcher is not None and hasattr(fetcher, 'get_realtime_quote'):
                         quote = self._call_fetcher_method(fetcher, 'get_realtime_quote', stock_code, source="tencent")
@@ -1375,7 +1592,8 @@ class DataFetcherManager:
                     if primary_quote is None:
                         # First successful source becomes primary
                         primary_quote = quote
-                        logger.info(f"[实时行情] {stock_code} 成功获取 (来源: {source})")
+                        quote_source = getattr(getattr(quote, "source", None), "value", source)
+                        logger.info(f"[实时行情] {stock_code} 成功获取 (来源: {quote_source})")
                         # If all key supplementary fields are present, return early
                         if not self._quote_needs_supplement(primary_quote):
                             return primary_quote
@@ -1421,10 +1639,18 @@ class DataFetcherManager:
         'pe_ratio', 'pb_ratio', 'total_mv', 'circ_mv',
         'amplitude',
     ]
+    _PUBLIC_REALTIME_SOURCES = frozenset({
+        "tencent",
+        "sina",
+        "eastmoney",
+    })
 
     @classmethod
-    def _quote_needs_supplement(cls, quote) -> bool:
+    def _quote_needs_supplement(cls, quote, *, accept_sparse_public: bool = False) -> bool:
         """Check if any key supplementary field is still None."""
+        quote_source = getattr(getattr(quote, "source", None), "value", "")
+        if accept_sparse_public and quote_source in cls._PUBLIC_REALTIME_SOURCES:
+            return False
         for f in cls._SUPPLEMENT_FIELDS:
             if getattr(quote, f, None) is None:
                 return True
@@ -1468,6 +1694,53 @@ class DataFetcherManager:
         except Exception as e:
             logger.debug(f"[实时行情] {stock_code} {fetcher_name} 获取失败: {e}")
         return None
+
+    def _route_realtime_quote(
+        self,
+        stock_code: str,
+        market_label: str,
+        route: List[Tuple[str, Dict[str, Any]]],
+        *,
+        accept_sparse_public: bool = False,
+    ):
+        """Try a market-specific route and enrich the first successful quote."""
+        primary_quote = None
+        supplement_attempts = 0
+        for fetcher_name, kwargs in route:
+            quote = self._try_fetcher_quote(stock_code, fetcher_name, **kwargs)
+            if quote is None:
+                continue
+            if primary_quote is None:
+                primary_quote = quote
+                quote_source = getattr(getattr(quote, "source", None), "value", fetcher_name)
+                logger.info(
+                    "[实时行情] %s %s 成功获取 (来源: %s)",
+                    market_label,
+                    stock_code,
+                    quote_source,
+                )
+                if not self._quote_needs_supplement(
+                    primary_quote,
+                    accept_sparse_public=accept_sparse_public,
+                ):
+                    break
+                continue
+
+            supplement_attempts += 1
+            filled = self._merge_quote_fields(primary_quote, quote)
+            if filled:
+                logger.info(
+                    "[实时行情] %s 从 %s 补充了: %s",
+                    stock_code,
+                    fetcher_name,
+                    filled,
+                )
+            if not self._quote_needs_supplement(
+                primary_quote,
+                accept_sparse_public=accept_sparse_public,
+            ) or supplement_attempts >= 1:
+                break
+        return primary_quote
 
     def _supplement_quote(self, stock_code: str, primary_quote, fetcher_name: str, **kw):
         """Supplement *primary_quote* with data from *fetcher_name*.
@@ -1513,8 +1786,8 @@ class DataFetcherManager:
         Returns:
             ChipDistribution 对象，失败则返回 None
         """
-        # Normalize code (strip SH/SZ prefix etc.)
-        stock_code = normalize_stock_code(stock_code)
+        raw_stock_code = (stock_code or "").strip()
+        normalized_stock_code = normalize_stock_code(raw_stock_code)
 
         from .realtime_types import get_chip_circuit_breaker
         from src.config import get_config
@@ -1523,13 +1796,17 @@ class DataFetcherManager:
 
         # 如果筹码分布功能被禁用，直接返回 None
         if not config.enable_chip_distribution:
-            logger.debug(f"[筹码分布] 功能已禁用，跳过 {stock_code}")
+            logger.debug(f"[筹码分布] 功能已禁用，跳过 {raw_stock_code}")
             return None
 
         circuit_breaker = get_chip_circuit_breaker()
 
         # 直接遍历管理器已经按 priority 排好序的数据源列表
-        for fetcher in self._get_fetchers_snapshot():
+        fetchers = self._filter_fetchers_for_exchange_identity(
+            self._get_fetchers_snapshot(),
+            raw_stock_code,
+        )
+        for fetcher in fetchers:
             # 只处理实现了筹码分布逻辑的数据源
             if not hasattr(fetcher, 'get_chip_distribution'):
                 continue
@@ -1544,20 +1821,25 @@ class DataFetcherManager:
                 continue
 
             try:
-                chip = self._call_fetcher_method(fetcher, 'get_chip_distribution', stock_code)
+                routed_code = self._stock_code_for_fetcher(
+                    fetcher,
+                    raw_stock_code,
+                    normalized_stock_code,
+                )
+                chip = self._call_fetcher_method(fetcher, 'get_chip_distribution', routed_code)
                 if chip is not None:
                     circuit_breaker.record_success(source_key)
-                    logger.info(f"[筹码分布] {stock_code} 成功获取 (来源: {fetcher_name})")
+                    logger.info(f"[筹码分布] {raw_stock_code} 成功获取 (来源: {fetcher_name})")
                     return chip
                 else:
                     # 空结果：释放 HALF_OPEN 探测名额，避免卡死
                     circuit_breaker.record_inconclusive(source_key)
             except Exception as e:
-                logger.warning(f"[筹码分布] {fetcher_name} 获取 {stock_code} 失败: {e}")
+                logger.warning(f"[筹码分布] {fetcher_name} 获取 {raw_stock_code} 失败: {e}")
                 circuit_breaker.record_failure(source_key, str(e))
                 continue
 
-        logger.warning(f"[筹码分布] {stock_code} 所有数据源均失败")
+        logger.warning(f"[筹码分布] {raw_stock_code} 所有数据源均失败")
         return None
 
     def get_stock_name(self, stock_code: str, allow_realtime: bool = True) -> Optional[str]:
@@ -1580,36 +1862,43 @@ class DataFetcherManager:
             股票中文名称，所有数据源都失败则返回 None
         """
         raw_stock_code = (stock_code or "").strip()
-        # Normalize code (strip SH/SZ prefix etc.)
-        stock_code = normalize_stock_code(stock_code)
-        static_name = STOCK_NAME_MAP.get(stock_code)
+        normalized_stock_code = normalize_stock_code(raw_stock_code)
+        identity_sensitive = _requires_exchange_aware_fetcher(raw_stock_code)
+        static_name = None if identity_sensitive else STOCK_NAME_MAP.get(normalized_stock_code)
 
         # 1. 先检查缓存
-        cached_name = self._get_cached_stock_name(stock_code)
+        cached_name = self._get_cached_stock_name(raw_stock_code or normalized_stock_code)
         if cached_name is not None:
             return cached_name
         
-        if is_meaningful_stock_name(static_name, stock_code):
-            return self._cache_stock_name(stock_code, static_name) or static_name
+        if is_meaningful_stock_name(static_name, normalized_stock_code):
+            return self._cache_stock_name(raw_stock_code or normalized_stock_code, static_name) or static_name
 
-        index_name = get_index_stock_name(stock_code)
-        if is_meaningful_stock_name(index_name, stock_code):
-            return self._cache_stock_name(stock_code, index_name) or index_name
+        index_name = None if identity_sensitive else get_index_stock_name(normalized_stock_code)
+        if is_meaningful_stock_name(index_name, normalized_stock_code):
+            return self._cache_stock_name(raw_stock_code or normalized_stock_code, index_name) or index_name
 
         # 2. 尝试从实时行情中获取（最快，可按需禁用）
         if allow_realtime:
-            quote = self.get_realtime_quote(raw_stock_code or stock_code, log_final_failure=False)
-            if quote and hasattr(quote, 'name') and is_meaningful_stock_name(getattr(quote, 'name', ''), stock_code):
+            quote = self.get_realtime_quote(raw_stock_code or normalized_stock_code, log_final_failure=False)
+            if quote and hasattr(quote, 'name') and is_meaningful_stock_name(
+                getattr(quote, 'name', ''),
+                normalized_stock_code,
+            ):
                 name = quote.name
-                self._cache_stock_name(stock_code, name)
-                logger.info(f"[股票名称] 从实时行情获取: {stock_code} -> {name}")
+                self._cache_stock_name(raw_stock_code or normalized_stock_code, name)
+                logger.info(f"[股票名称] 从实时行情获取: {raw_stock_code or normalized_stock_code} -> {name}")
                 return name
 
         # 3. 依次尝试各个数据源
         from .akshare_fetcher import _is_us_code
-        is_us = _is_us_code(stock_code)
+        is_us = _is_us_code(normalized_stock_code)
         _US_CAPABLE_FETCHERS = {"YfinanceFetcher", "LongbridgeFetcher"}
-        for fetcher in self._get_fetchers_snapshot():
+        fetchers = self._filter_fetchers_for_exchange_identity(
+            self._get_fetchers_snapshot(),
+            raw_stock_code,
+        )
+        for fetcher in fetchers:
             if not hasattr(fetcher, 'get_stock_name'):
                 continue
             if is_us and fetcher.name not in _US_CAPABLE_FETCHERS:
@@ -1617,17 +1906,25 @@ class DataFetcherManager:
             if not self._is_fetcher_available(fetcher, capability="stock_name"):
                 continue
             try:
-                name = self._call_fetcher_method(fetcher, 'get_stock_name', stock_code)
-                if is_meaningful_stock_name(name, stock_code):
-                    self._cache_stock_name(stock_code, name)
-                    logger.info(f"[股票名称] 从 {fetcher.name} 获取: {stock_code} -> {name}")
+                routed_code = self._stock_code_for_fetcher(
+                    fetcher,
+                    raw_stock_code,
+                    normalized_stock_code,
+                )
+                name = self._call_fetcher_method(fetcher, 'get_stock_name', routed_code)
+                if is_meaningful_stock_name(name, normalized_stock_code):
+                    self._cache_stock_name(raw_stock_code or normalized_stock_code, name)
+                    logger.info(
+                        f"[股票名称] 从 {fetcher.name} 获取: "
+                        f"{raw_stock_code or normalized_stock_code} -> {name}"
+                    )
                     return name
             except Exception as e:
                 logger.debug(f"[股票名称] {fetcher.name} 获取失败: {e}")
                 continue
 
         # 4. 所有数据源都失败
-        logger.warning(f"[股票名称] 所有数据源都无法获取 {stock_code} 的名称")
+        logger.warning(f"[股票名称] 所有数据源都无法获取 {raw_stock_code or normalized_stock_code} 的名称")
         return ""
 
     def get_belong_boards(self, stock_code: str) -> List[Dict[str, Any]]:
@@ -1636,17 +1933,30 @@ class DataFetcherManager:
 
         Keep this at manager layer to avoid changing BaseFetcher abstraction.
         """
-        stock_code = normalize_stock_code(stock_code)
-        if _market_tag(stock_code) != "cn":
+        raw_stock_code = (stock_code or "").strip()
+        normalized_stock_code = normalize_stock_code(raw_stock_code)
+        if _market_tag(normalized_stock_code) != "cn":
             return []
-        for fetcher in self._fetchers:
+        fetchers = self._filter_fetchers_for_exchange_identity(
+            self._get_fetchers_snapshot(),
+            raw_stock_code,
+        )
+        for fetcher in fetchers:
             if not hasattr(fetcher, "get_belong_board"):
                 continue
             try:
-                raw_data = fetcher.get_belong_board(stock_code)
+                routed_code = self._stock_code_for_fetcher(
+                    fetcher,
+                    raw_stock_code,
+                    normalized_stock_code,
+                )
+                raw_data = self._call_fetcher_method(fetcher, "get_belong_board", routed_code)
                 boards = self._normalize_belong_boards(raw_data)
                 if boards:
-                    logger.info(f"[{fetcher.name}] 获取所属板块成功: {stock_code}, count={len(boards)}")
+                    logger.info(
+                        f"[{fetcher.name}] 获取所属板块成功: "
+                        f"{raw_stock_code or normalized_stock_code}, count={len(boards)}"
+                    )
                     return boards
             except Exception as e:
                 logger.debug(f"[{fetcher.name}] 获取所属板块失败: {e}")
@@ -1666,7 +1976,7 @@ class DataFetcherManager:
         """
         if not stock_codes:
             return
-        stock_codes = [normalize_stock_code(c) for c in stock_codes]
+        stock_codes = [_stock_code_for_identity_sensitive_lookup(c) for c in stock_codes]
         if use_bulk:
             self.batch_get_stock_names(stock_codes)
             return
@@ -1688,14 +1998,18 @@ class DataFetcherManager:
         Returns:
             {股票代码: 股票名称} 字典
         """
+        stock_codes = [_stock_code_for_identity_sensitive_lookup(code) for code in stock_codes]
         result = {}
         missing_codes = set(stock_codes)
+        bulk_safe_codes = {
+            code for code in missing_codes if not _requires_exchange_aware_fetcher(code)
+        }
         
         # 1. 先检查缓存
         self._ensure_concurrency_guards()
         with self._stock_name_cache_lock:
             for code in stock_codes:
-                cached_name = self._stock_name_cache.get(code)
+                cached_name = self._stock_name_cache.get(_exchange_aware_stock_identity(code))
                 if cached_name is not None:
                     result[code] = cached_name
                     missing_codes.discard(code)
@@ -1718,13 +2032,18 @@ class DataFetcherManager:
                         name = row.get('name')
                         if code and name:
                             cache_updates[code] = name
-                            if code in missing_codes:
+                            if code in missing_codes and code in bulk_safe_codes:
                                 result[code] = name
                                 missing_codes.discard(code)
 
                     if cache_updates:
                         with self._stock_name_cache_lock:
-                            self._stock_name_cache.update(cache_updates)
+                            self._stock_name_cache.update(
+                                {
+                                    _exchange_aware_stock_identity(code): name
+                                    for code, name in cache_updates.items()
+                                }
+                            )
                     
                     if not missing_codes:
                         break
@@ -2097,14 +2416,21 @@ class DataFetcherManager:
         """
         from src.config import get_config
 
+        raw_stock_code = (stock_code or "").strip()
         config = get_config()
         if not config.enable_fundamental_pipeline:
             return self._build_market_not_supported(
-                market=_market_tag(stock_code),
+                market=_market_tag(raw_stock_code),
                 reason="fundamental pipeline disabled",
             )
 
-        stock_code = normalize_stock_code(stock_code)
+        if _requires_exchange_aware_fetcher(raw_stock_code):
+            return self._build_market_not_supported(
+                market="cn",
+                reason="explicit exchange identity is not supported by fundamental providers",
+            )
+
+        stock_code = normalize_stock_code(raw_stock_code)
         market = _market_tag(stock_code)
         is_etf = _is_etf_code(stock_code)
         if market in {"us", "hk"}:
@@ -2394,8 +2720,16 @@ class DataFetcherManager:
         """资金流向块（fail-open）。"""
         from src.config import get_config
 
+        raw_stock_code = (stock_code or "").strip()
         config = get_config()
-        stock_code = normalize_stock_code(stock_code)
+        if _requires_exchange_aware_fetcher(raw_stock_code):
+            return self._build_fundamental_block(
+                "not_supported",
+                {},
+                [{"provider": "fundamental_pipeline", "result": "not_supported", "duration_ms": 0}],
+                ["explicit exchange identity is not supported by fundamental providers"],
+            )
+        stock_code = normalize_stock_code(raw_stock_code)
         timeout = float(budget_seconds if budget_seconds is not None else config.fundamental_fetch_timeout_seconds)
         if _market_tag(stock_code) != "cn" or _is_etf_code(stock_code):
             return self._build_fundamental_block(
@@ -2458,8 +2792,16 @@ class DataFetcherManager:
         """龙虎榜块（fail-open）。"""
         from src.config import get_config
 
+        raw_stock_code = (stock_code or "").strip()
         config = get_config()
-        stock_code = normalize_stock_code(stock_code)
+        if _requires_exchange_aware_fetcher(raw_stock_code):
+            return self._build_fundamental_block(
+                "not_supported",
+                {},
+                [{"provider": "fundamental_pipeline", "result": "not_supported", "duration_ms": 0}],
+                ["explicit exchange identity is not supported by fundamental providers"],
+            )
+        stock_code = normalize_stock_code(raw_stock_code)
         timeout = float(budget_seconds if budget_seconds is not None else config.fundamental_fetch_timeout_seconds)
         if _market_tag(stock_code) != "cn" or _is_etf_code(stock_code):
             return self._build_fundamental_block(
@@ -2508,8 +2850,16 @@ class DataFetcherManager:
         """板块榜单块（fail-open）。"""
         from src.config import get_config
 
+        raw_stock_code = (stock_code or "").strip()
         config = get_config()
-        stock_code = normalize_stock_code(stock_code)
+        if _requires_exchange_aware_fetcher(raw_stock_code):
+            return self._build_fundamental_block(
+                "not_supported",
+                {},
+                [{"provider": "fundamental_pipeline", "result": "not_supported", "duration_ms": 0}],
+                ["explicit exchange identity is not supported by fundamental providers"],
+            )
+        stock_code = normalize_stock_code(raw_stock_code)
         timeout = float(budget_seconds if budget_seconds is not None else config.fundamental_fetch_timeout_seconds)
         if _market_tag(stock_code) != "cn" or _is_etf_code(stock_code):
             return self._build_fundamental_block(

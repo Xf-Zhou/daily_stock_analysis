@@ -41,6 +41,10 @@ class _FallbackNameFetcher:
         return self.return_name
 
 
+class _TushareNameFetcher(_FallbackNameFetcher):
+    name = "TushareFetcher"
+
+
 class _ThreadUnsafeStockListFetcher:
     name = "ThreadUnsafeStockListFetcher"
 
@@ -78,6 +82,40 @@ class TestPrefetchStockNames(unittest.TestCase):
                 call("000001", allow_realtime=False),
             ]
         )
+
+    def test_prefetch_preserves_nondefault_explicit_exchange_identity(self):
+        manager = DataFetcherManager.__new__(DataFetcherManager)
+        manager.get_stock_name = MagicMock(return_value="")
+
+        DataFetcherManager.prefetch_stock_names(
+            manager,
+            ["000001.SH", "000001.SZ"],
+            use_bulk=False,
+        )
+
+        manager.get_stock_name.assert_has_calls(
+            [
+                call("000001.SH", allow_realtime=False),
+                call("000001", allow_realtime=False),
+            ]
+        )
+
+    def test_prefetch_default_exchange_identity_hits_later_explicit_lookup(self):
+        manager = DataFetcherManager.__new__(DataFetcherManager)
+        fetcher = _FallbackNameFetcher("测试股票")
+        manager._fetchers = [fetcher]
+        manager.get_realtime_quote = MagicMock(return_value=None)
+
+        with patch.dict("data_provider.base.STOCK_NAME_MAP", {}, clear=True), patch(
+            "data_provider.base.get_index_stock_name",
+            return_value=None,
+        ):
+            manager.prefetch_stock_names(["123456.SZ"], use_bulk=False)
+            name = manager.get_stock_name("123456.SZ", allow_realtime=False)
+
+        self.assertEqual(name, "测试股票")
+        self.assertEqual(fetcher.calls, ["123456"])
+        self.assertEqual(manager._stock_name_cache, {"123456": "测试股票"})
 
     def test_get_stock_name_skips_realtime_when_allow_realtime_false(self):
         manager = DataFetcherManager.__new__(DataFetcherManager)
@@ -158,6 +196,29 @@ class TestPrefetchStockNames(unittest.TestCase):
 
         self.assertEqual(name, "平安银行")
         manager.get_realtime_quote.assert_called_once_with("000001.SZ", log_final_failure=False)
+
+    def test_get_stock_name_never_reuses_same_digits_from_another_exchange(self):
+        manager = DataFetcherManager.__new__(DataFetcherManager)
+        unsafe_fetcher = _FallbackNameFetcher("错误的深市名称")
+        unsafe_fetcher.name = "EfinanceFetcher"
+        tushare = _TushareNameFetcher("上证指数")
+        manager._fetchers = [unsafe_fetcher, tushare]
+        manager.get_realtime_quote = MagicMock(return_value=None)
+
+        with patch.dict("data_provider.base.STOCK_NAME_MAP", {"000001": "平安银行"}, clear=True):
+            with patch("data_provider.base.get_index_stock_name", return_value="平安银行") as index_lookup:
+                name = DataFetcherManager.get_stock_name(
+                    manager,
+                    "000001.SH",
+                    allow_realtime=False,
+                )
+
+        self.assertEqual(name, "上证指数")
+        index_lookup.assert_not_called()
+        self.assertEqual(unsafe_fetcher.calls, [])
+        self.assertEqual(tushare.calls, ["000001.SH"])
+        self.assertEqual(manager._stock_name_cache["000001.SH"], "上证指数")
+        self.assertNotIn("000001", manager._stock_name_cache)
 
     def test_fetch_and_save_stock_data_uses_lightweight_name_lookup(self):
         pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)

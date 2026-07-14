@@ -334,7 +334,14 @@ daily_stock_analysis/
 | `ENABLE_REALTIME_TECHNICAL_INDICATORS` | 盘中实时技术面：启用时用实时价计算 MA5/MA10/MA20 与多头排列（Issue #234）；关闭则用昨日收盘 | `true` | 可选 |
 | `ENABLE_CHIP_DISTRIBUTION` | 启用筹码分布分析（该接口不稳定，云端部署建议关闭）。GitHub Actions 用户需在 Repository Variables 中设置 `ENABLE_CHIP_DISTRIBUTION=true` 方可启用；workflow 默认关闭。 | `true` | 可选 |
 | `ENABLE_EASTMONEY_PATCH` | 东财接口补丁：东财接口频繁失败（如 RemoteDisconnected、连接被关闭）时建议设为 `true`，注入 NID 令牌与随机 User-Agent 以降低被限流概率 | `false` | 可选 |
-| `REALTIME_SOURCE_PRIORITY` | 实时行情数据源优先级（逗号分隔），如 `tencent,akshare_sina,efinance,akshare_em` | 见 .env.example | 可选 |
+| `REALTIME_SOURCE_PRIORITY` | 实时行情数据源优先级（逗号分隔）；默认 `public_auto,efinance,akshare_em` | 见 .env.example | 可选 |
+| `PUBLIC_MARKET_ENABLED` | 是否启用腾讯/新浪/东方财富公开直连适配器 | `true` | 可选 |
+| `PUBLIC_MARKET_SOURCE_ORDER` | `public_auto` 内部来源顺序 | `tencent,sina,eastmoney` | 可选 |
+| `PUBLIC_MARKET_TIMEOUT_SECONDS` | 单次公开行情 HTTP 请求超时（秒） | `4` | 可选 |
+| `PUBLIC_MARKET_OVERALL_TIMEOUT_SECONDS` | 单次公开行情 auto 操作总预算（秒）；目标化批量预取时由整批共享 | `8` | 可选 |
+| `PUBLIC_MARKET_QUOTE_CACHE_TTL_SECONDS` | 公开实时行情进程内短缓存（秒） | `15` | 可选 |
+| `PUBLIC_MARKET_MIN_INTERVAL_SECONDS` | 公开行情 HTTP 请求之间的最小间隔（秒） | `0.05` | 可选 |
+| `PUBLIC_MARKET_PRIORITY` | 公开行情日线 fetcher 优先级，数字越小越优先 | `0` | 可选 |
 | `ENABLE_FUNDAMENTAL_PIPELINE` | 基本面聚合总开关；关闭时仅返回 `not_supported` 块，不改变原分析链路 | `true` | 可选 |
 | `FUNDAMENTAL_STAGE_TIMEOUT_SECONDS` | 基本面阶段总时延预算（秒） | `1.5` | 可选 |
 | `FUNDAMENTAL_FETCH_TIMEOUT_SECONDS` | 单能力源调用超时（秒） | `0.8` | 可选 |
@@ -930,9 +937,20 @@ PUSHOVER_API_TOKEN=your_api_token
 
 ## 数据源配置
 
-系统默认使用 AkShare（免费），也支持其他数据源：
+系统默认优先使用免费的公开行情 auto，并保留 AkShare、Efinance、YFinance、Tushare 和 Longbridge 等原有兜底：
 
-### AkShare（默认）
+### 公开行情 auto（默认）
+- 原生 Python 直连腾讯、新浪与东方财富，无需额外 Token；实时行情默认按 `tencent -> sina -> eastmoney` 自动切换
+- 覆盖 A 股、北交所、港股和美股个股；美股指数继续使用 YFinance，避免公开接口的指数与复权口径差异
+- 单次请求有超时与硬总预算（包括响应体读取），按 provider/capability 使用现有熔断器；实时行情带 15 秒短缓存，同一批自选股可使用目标化批量请求，不拉取全市场
+- 日 K 统一使用前复权口径，A 股/北交所成交量统一为“股”，并在每个来源返回后校验 OHLC、日期、重复行、最新日期和窗口密度；新浪公开 K 线不支持复权，因此只参与实时报价，稀疏/异常结果不会阻断后续 YFinance、AkShare、Efinance 等 fetcher fallback
+- `PUBLIC_MARKET_PRIORITY` 会参与美股个股日线 fetcher 排序；调大到高于 `YFINANCE_PRIORITY` 后会先尝试 YFinance，美股指数仍固定使用 YFinance
+- 美股公开实时报价已包含有效价格时会直接复用 15 秒短缓存，不会仅因量比、换手率或估值等公开源固定缺失的可选字段再请求 YFinance；公开源不可用时仍会正常回退
+- 显式携带 SH/SZ 的代码会保留交易所身份；对于 `000001.SH` 这类与默认推断交易所不同的代码，历史 K 线缓存只读写带交易所的独立键，不会回退到纯数字键。名称、筹码、板块和基本面数据源若无法区分同六码证券，也会被跳过或返回不支持，避免跨交易所串股
+- 可通过 `PUBLIC_MARKET_SOURCE_ORDER` 调整 auto 内部顺序，也可在 `REALTIME_SOURCE_PRIORITY` 中使用 `tencent`、`sina`、`eastmoney` 固定单一来源进行诊断
+- 该适配器参考 MIT 许可项目 [zhangxiangliang/stock-api](https://github.com/zhangxiangliang/stock-api) 的多源选择思路，未引入 Node 运行时或子进程依赖
+
+### AkShare
 - 免费，无需配置
 - 数据来源：东方财富爬虫
 - 港股实时行情会对 `stock_hk_spot_em()` 与备用 `stock_hk_spot()` 做调用方超时保护：默认最多等待 30 秒，超时后本次问股/分析会继续走备用链路或降级返回
@@ -950,7 +968,7 @@ PUSHOVER_API_TOKEN=your_api_token
 ### YFinance
 - 免费，无需配置
 - 支持美股/港股数据
-- 美股历史数据与实时行情均统一使用 YFinance，以避免 akshare 美股复权异常导致的技术指标错误
+- 美股个股在公开行情 auto 无法返回完整日 K 时自动回退到 YFinance；美股指数仍直接使用 YFinance
 
 ### Longbridge（长桥）
 - 美股/港股数据兜底，补充 YFinance 缺失的量比、换手率、PE 等字段
@@ -982,7 +1000,7 @@ PUSHOVER_API_TOKEN=your_api_token
 STOCK_LIST=600519,hk00700,hk01810
 ```
 
-港股日线会跳过 efinance、pytdx、baostock 等不支持港股日线的数据源，避免把港股代码错配到非港股市场；默认改由 AkShare/Tushare/YFinance/Longbridge 等港股路径继续兜底。
+港股日线会跳过 efinance、pytdx、baostock 等不支持港股日线的数据源，避免把港股代码错配到非港股市场；默认先尝试公开行情 auto，再由 AkShare/Tushare/YFinance/Longbridge 等港股路径继续兜底。
 
 ### ETF 与指数分析
 

@@ -48,7 +48,27 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
         self.assertIsNone(config.tickflow_api_key)
         self.assertEqual(
             config.realtime_source_priority,
-            "tencent,akshare_sina,efinance,akshare_em",
+            "public_auto,efinance,akshare_em",
+        )
+
+    @patch("src.config.setup_env")
+    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
+    def test_tushare_is_injected_ahead_of_public_auto_by_default(
+        self, _mock_parse_litellm_yaml, _mock_setup_env
+    ):
+        with patch.dict(
+            os.environ,
+            {
+                "STOCK_LIST": "600519",
+                "TUSHARE_TOKEN": "test-token",
+            },
+            clear=True,
+        ):
+            config = Config._load_from_env()
+
+        self.assertEqual(
+            config.realtime_source_priority,
+            "tushare,public_auto,efinance,akshare_em",
         )
 
     @patch("src.config.setup_env")
