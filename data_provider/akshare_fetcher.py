@@ -31,7 +31,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Set, Tuple
 
 import pandas as pd
 import requests
@@ -71,6 +71,7 @@ _AK_CALL_EXECUTOR = ThreadPoolExecutor(
 )
 _AK_CALL_SEMAPHORE = threading.BoundedSemaphore(_AK_CALL_MAX_WORKERS)
 _AK_TIMEOUT_UNTIL: Dict[str, float] = {}
+_AK_INFLIGHT_CALLS: Set[str] = set()
 _AK_TIMEOUT_LOCK = threading.Lock()
 
 
@@ -204,11 +205,17 @@ def _get_ak_call_name(func) -> str:
     return getattr(func, "__name__", None) or getattr(func, "__qualname__", None) or "akshare_call"
 
 
-def _run_ak_call(func, args, kwargs):
+def _release_ak_call_slot(func_name: str) -> None:
+    with _AK_TIMEOUT_LOCK:
+        _AK_INFLIGHT_CALLS.discard(func_name)
+    _AK_CALL_SEMAPHORE.release()
+
+
+def _run_ak_call(func_name, func, args, kwargs):
     try:
         return func(*args, **kwargs)
     finally:
-        _AK_CALL_SEMAPHORE.release()
+        _release_ak_call_slot(func_name)
 
 
 def _ak_call_with_timeout(func, *args, timeout: int = _AK_CALL_TIMEOUT, **kwargs):
@@ -222,14 +229,19 @@ def _ak_call_with_timeout(func, *args, timeout: int = _AK_CALL_TIMEOUT, **kwargs
             raise TimeoutError(f"{func_name} skipped during timeout cooldown ({remaining}s remaining)")
         if cooldown_until:
             _AK_TIMEOUT_UNTIL.pop(func_name, None)
+        if func_name in _AK_INFLIGHT_CALLS:
+            raise TimeoutError(f"{func_name} skipped because previous call is still running")
+        _AK_INFLIGHT_CALLS.add(func_name)
 
     if not _AK_CALL_SEMAPHORE.acquire(blocking=False):
+        with _AK_TIMEOUT_LOCK:
+            _AK_INFLIGHT_CALLS.discard(func_name)
         raise TimeoutError(f"{func_name} skipped because AkShare call pool is saturated")
 
     try:
-        future = _AK_CALL_EXECUTOR.submit(_run_ak_call, func, args, kwargs)
+        future = _AK_CALL_EXECUTOR.submit(_run_ak_call, func_name, func, args, kwargs)
     except Exception:
-        _AK_CALL_SEMAPHORE.release()
+        _release_ak_call_slot(func_name)
         raise
 
     try:
@@ -239,7 +251,7 @@ def _ak_call_with_timeout(func, *args, timeout: int = _AK_CALL_TIMEOUT, **kwargs
         return result
     except FuturesTimeoutError as exc:
         if future.cancel():
-            _AK_CALL_SEMAPHORE.release()
+            _release_ak_call_slot(func_name)
         with _AK_TIMEOUT_LOCK:
             _AK_TIMEOUT_UNTIL[func_name] = time.monotonic() + _AK_TIMEOUT_COOLDOWN_SECONDS
         raise TimeoutError(f"{func_name} timeout after {timeout}s") from exc
@@ -1693,7 +1705,7 @@ class AkshareFetcher(BaseFetcher):
             self._enforce_rate_limit()
 
             logger.info("[API调用] ak.stock_zh_a_spot_em() 获取市场统计...")
-            df = ak.stock_zh_a_spot_em()
+            df = _ak_call_with_timeout(ak.stock_zh_a_spot_em)
             if df is not None and not df.empty:
                 return self._calc_market_stats(df)
         except Exception as e:
@@ -1705,7 +1717,7 @@ class AkshareFetcher(BaseFetcher):
             self._enforce_rate_limit()
 
             logger.info("[API调用] ak.stock_zh_a_spot() 获取市场统计(新浪)...")
-            df = ak.stock_zh_a_spot()
+            df = _ak_call_with_timeout(ak.stock_zh_a_spot)
             if df is not None and not df.empty:
                 return self._calc_market_stats(df)
         except Exception as e:

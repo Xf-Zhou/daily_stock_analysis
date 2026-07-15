@@ -429,6 +429,27 @@ deploy:
 
 **验证**：用浏览器开发者工具（F12 → Network）检查是否有 `/assets/index-*.js` 和 `/assets/index-*.css` 的 404 错误；如有，说明资源缺失，按上述步骤重新构建即可。
 
+### 6. `stock-analyzer` 显示 healthy，但定时任务不再执行
+
+`healthy` 只表示容器进程和健康检查仍在运行，不代表某次定时回调已经完成。先检查容器启动时间、任务起止日志和最新报告：
+
+```bash
+docker inspect -f 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{end}} started={{.State.StartedAt}}' stock-analyzer
+docker logs --timestamps --since 7d stock-analyzer 2>&1 | grep -E '定时任务开始执行|定时任务执行完成|调度器运行中|下次执行时间|Traceback|ERROR'
+ls -lt reports/ | head
+```
+
+如果日志只有“定时任务开始执行”，之后长期没有“执行完成”或新的调度心跳，通常表示任务卡在同步三方调用中。当前版本已为 A 股大盘统计的东方财富与新浪 AkShare 全市场接口增加调用方超时保护；同名调用超时后会进入冷却，底层线程仍未返回时不会重复提交，后台 AkShare 调用池最多保留 2 个工作线程。
+
+更新代码后只重建定时任务容器，并继续观察日志：
+
+```bash
+docker compose -f docker/docker-compose.yml up -d --build analyzer
+docker compose -f docker/docker-compose.yml logs -f --tail=200 analyzer
+```
+
+Python 线程无法强制终止已经卡住的三方库调用，因此旧版本中已经挂起的调用需要通过重建或重启 `analyzer` 容器清除；Web/API 的 `server` 容器无需一起重启。
+
 ---
 
 ## 🔄 快速迁移

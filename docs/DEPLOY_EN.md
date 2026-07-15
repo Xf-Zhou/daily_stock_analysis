@@ -387,6 +387,27 @@ deploy:
       memory: 1G
 ```
 
+### 5. `stock-analyzer` is healthy, but scheduled jobs no longer run
+
+`healthy` only confirms that the container process and health check are alive; it does not prove that a scheduled callback completed. Check the container start time, job start/completion logs, and the newest report first:
+
+```bash
+docker inspect -f 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{end}} started={{.State.StartedAt}}' stock-analyzer
+docker logs --timestamps --since 7d stock-analyzer 2>&1 | grep -E '定时任务开始执行|定时任务执行完成|调度器运行中|下次执行时间|Scheduled task|scheduler|next run|Traceback|ERROR'
+ls -lt reports/ | head
+```
+
+If a job-start message is followed by no completion message or later scheduler heartbeat, the callback is usually stuck in a synchronous third-party call. The current version applies caller-side timeouts to the Eastmoney and Sina AkShare whole-market endpoints used for A-share market statistics. A timed-out function enters cooldown, is not submitted again while its underlying worker is still running, and the shared AkShare pool is capped at 2 workers.
+
+After updating the code, rebuild only the scheduler container and keep watching its logs:
+
+```bash
+docker compose -f docker/docker-compose.yml up -d --build analyzer
+docker compose -f docker/docker-compose.yml logs -f --tail=200 analyzer
+```
+
+Python cannot forcibly terminate a third-party call already running in a thread. Rebuild or restart the `analyzer` container to clear calls that became stuck on an older version; the Web/API `server` container does not need to restart.
+
 ---
 
 ## Quick Migration

@@ -849,8 +849,8 @@ The system now prefers the free public-market auto adapter and retains AkShare, 
 ### AkShare
 - Free, no configuration needed
 - Data source: Eastmoney scraper
-- HK realtime quotes wrap `stock_hk_spot_em()` and fallback `stock_hk_spot()` with caller-side timeout protection: the app waits up to 30 seconds by default, then continues through fallback paths or degraded results for the current chat/analysis request
-- After an AkShare function times out, the same function enters an approximately 60-second cooldown, and at most 2 background AkShare calls may remain in flight at once, reducing service-process pressure when a third-party endpoint hangs
+- HK realtime quotes (`stock_hk_spot_em()` / `stock_hk_spot()`) and A-share market statistics (`stock_zh_a_spot_em()` / `stock_zh_a_spot()`) use caller-side timeout protection: the app waits up to 30 seconds by default, then continues through fallback paths or degraded results for the current chat, analysis, or market-review request
+- After an AkShare function times out, the same function enters an approximately 60-second cooldown and is not submitted again while its underlying worker is still running. The shared AkShare pool is capped at 2 workers and degrades immediately when saturated, preventing hung third-party endpoints from blocking later scheduler runs
 
 ### Tushare Pro
 - Requires registration to get Token
