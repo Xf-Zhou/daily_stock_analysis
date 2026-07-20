@@ -605,6 +605,28 @@ def test_request_queue_wait_counts_toward_overall_deadline():
     session.get.assert_not_called()
 
 
+def test_request_passes_header_mapping_to_session():
+    session = MagicMock()
+    response = MagicMock()
+    response.status_code = 200
+    response.iter_content.return_value = iter((b"ok",))
+    session.get.return_value = response
+    fetcher = PublicMarketFetcher(session=session, min_interval_seconds=0)
+
+    fetcher._request(
+        "https://example.invalid",
+        time.monotonic() + 1,
+        headers={"Referer": "https://example.invalid/quote"},
+    )
+
+    request_headers = session.get.call_args.kwargs["headers"]
+    assert request_headers == {
+        "Accept": "*/*",
+        "User-Agent": "Mozilla/5.0 (compatible; daily-stock-analysis/1.0)",
+        "Referer": "https://example.invalid/quote",
+    }
+
+
 def test_slow_response_headers_are_stopped_by_wall_clock_deadline():
     session = MagicMock()
     response = MagicMock()

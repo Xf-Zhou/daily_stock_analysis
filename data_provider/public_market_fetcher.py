@@ -1255,7 +1255,7 @@ class PublicMarketFetcher(BaseFetcher):
         state_lock = Lock()
         state: dict[str, Any] = {"cancelled": False}
 
-        def request_headers() -> None:
+        def fetch_response_headers() -> None:
             if not slot_lease.claim_for_worker():
                 completed.set()
                 return
@@ -1315,7 +1315,7 @@ class PublicMarketFetcher(BaseFetcher):
 
         try:
             worker = Thread(
-                target=request_headers,
+                target=fetch_response_headers,
                 name="public-market-response-headers",
                 daemon=True,
             )
